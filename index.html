@@ -5,219 +5,423 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#111418">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Live Translator</title>
 <style>
   :root {
     --bg: #111418;
     --panel: #1b2027;
+    --panel-2: #232a33;
+    --mine: #1f3a2f;
     --text: #f4f6f8;
     --muted: #8a94a3;
     --accent: #2f9e6e;
-    --accent-stop: #d64545;
-    --interim: #9fb3c8;
+    --stop: #d64545;
+    --link: #3b82f6;
     --font-size: 34px;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
   body { display: flex; flex-direction: column; }
+  [hidden] { display: none !important; }
 
-  header { display: flex; align-items: center; gap: 8px; padding: 10px 16px;
-    background: var(--panel); flex-wrap: wrap; }
-  header h1 { font-size: 18px; margin: 0 auto 0 0; font-weight: 600; }
-  .status { font-size: 14px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+  header { background: var(--panel); padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .status { font-size: 14px; color: var(--muted); display: flex; align-items: center; gap: 6px; margin-right: auto; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
   .dot.on { background: #3ddc84; animation: pulse 1.2s infinite; }
   @keyframes pulse { 50% { opacity: .35; } }
+  .sync-badge { font-size: 13px; padding: 4px 10px; border-radius: 999px; background: var(--panel-2); color: var(--muted); }
+  .sync-badge.ok { background: #1d3b5c; color: #cfe3ff; }
 
-  button, select { font: inherit; font-size: 15px; border: 0; border-radius: 10px;
-    padding: 8px 12px; background: #2a313b; color: var(--text); cursor: pointer; }
+  button, input { font: inherit; font-size: 15px; border: 0; border-radius: 10px; color: var(--text); }
+  button { padding: 8px 12px; background: var(--panel-2); cursor: pointer; }
   button.on { background: var(--accent); }
+  .seg { display: inline-flex; background: var(--panel-2); border-radius: 10px; padding: 3px; }
+  .seg button { padding: 6px 12px; background: transparent; border-radius: 8px; }
+  .seg button.on { background: var(--accent); }
+  .tools { margin-left: auto; display: flex; gap: 6px; }
 
-  #feed { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
-  .line { background: var(--panel); border-radius: 14px; padding: 12px 16px; }
-  .line .en { font-size: var(--font-size); line-height: 1.25; font-weight: 600; }
-  .line .he { font-size: 15px; color: var(--muted); direction: rtl; text-align: right; margin-top: 6px; }
-  .line.interim .en { color: var(--interim); }
-  .empty { margin: auto; text-align: center; color: var(--muted); font-size: 20px; line-height: 1.6; }
-  .empty .he { direction: rtl; }
+  #feed { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .line { background: var(--panel); border-radius: 16px; padding: 12px 16px; max-width: 100%; }
+  .line .main { font-size: var(--font-size); line-height: 1.3; font-weight: 600; overflow-wrap: anywhere; }
+  .line .sub { font-size: 15px; color: var(--muted); margin-top: 6px; overflow-wrap: anywhere; }
+  .line.pending .main { color: var(--muted); }
+  .line.mine.chat { background: var(--mine); align-self: flex-end; max-width: 85%; }
+  .line.mine.chat .main { font-size: calc(var(--font-size) * .6); font-weight: 500; }
+  .line.theirs { align-self: flex-start; border: 1px solid #2c3a4a; }
+  .empty { margin: auto; text-align: center; color: var(--muted); font-size: 19px; line-height: 1.6; padding: 0 8px; }
 
-  footer { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: var(--panel); }
-  #mic { width: 100%; font-size: 22px; padding: 16px; border-radius: 14px;
-    background: var(--accent); font-weight: 700; }
-  #mic.listening { background: var(--accent-stop); }
-  .error { color: #ff8a8a; font-size: 14px; margin-bottom: 8px; direction: rtl; text-align: right; }
+  footer { padding: 10px 16px calc(12px + env(safe-area-inset-bottom)); background: var(--panel); }
+  .hearing { height: 22px; font-size: 15px; color: var(--muted); text-align: center; }
+  .hearing span { display: inline-block; animation: pulse 1s infinite; }
+  #mic { width: 100%; font-size: 22px; padding: 16px; border-radius: 14px; background: var(--accent); font-weight: 700; }
+  #mic.listening { background: var(--stop); }
+  .error { color: #ff8a8a; font-size: 14px; margin-bottom: 8px; text-align: center; }
+
+  /* sync dialog */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center;
+    justify-content: center; padding: 16px; z-index: 10; }
+  .dialog { background: var(--panel); border-radius: 18px; padding: 20px; width: 100%; max-width: 420px;
+    max-height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+  .dialog h2 { margin: 0; font-size: 20px; }
+  .dialog p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
+  .dialog .big { width: 100%; padding: 14px; font-size: 18px; font-weight: 600; }
+  .dialog .primary { background: var(--link); }
+  .dialog input { width: 100%; padding: 14px; background: var(--bg); font-size: 22px; text-align: center;
+    letter-spacing: 3px; text-transform: uppercase; }
+  .code { font-size: 34px; font-weight: 800; letter-spacing: 4px; text-align: center; }
+  .qr { background: #fff; border-radius: 12px; padding: 10px; align-self: center; line-height: 0; }
+  .qr svg { width: 210px; height: 210px; }
+  .or { text-align: center; color: var(--muted); font-size: 14px; }
+  .danger { background: #4a2323; }
 </style>
 </head>
 <body>
 <header>
-  <h1>🇮🇱 → 🇬🇧 Live Translator</h1>
-  <div class="status"><span class="dot" id="dot"></span><span id="statusText">Stopped</span></div>
-  <button id="smaller" title="Smaller text">A−</button>
-  <button id="bigger" title="Larger text">A+</button>
-  <button id="speak" title="Read English aloud">🔈 Speak</button>
-  <button id="clear" title="Clear">Clear</button>
+  <div class="row">
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">Stopped</span></div>
+    <span class="sync-badge" id="syncBadge" hidden></span>
+  </div>
+  <div class="row">
+    <div class="seg" title="Language spoken into this phone / השפה שמדברים לטלפון הזה">
+      <button data-lang="he">🎤 עברית</button>
+      <button data-lang="en">🎤 English</button>
+    </div>
+    <div class="tools">
+      <button id="smaller" title="Smaller text">A−</button>
+      <button id="bigger" title="Larger text">A+</button>
+      <button id="speak" title="Read translations aloud">🔈</button>
+      <button id="syncBtn" title="Connect another phone">🔗</button>
+      <button id="clear" title="Clear">🗑</button>
+    </div>
+  </div>
 </header>
 
 <main id="feed">
-  <div class="empty" id="empty">
-    <div class="he">לחצו על "Start" והתחילו לדבר בעברית.<br>התרגום לאנגלית יופיע כאן מיד.</div>
-    <div>Press "Start" — Hebrew speech will appear here translated to English.</div>
-  </div>
+  <div class="empty" id="empty"></div>
 </main>
 
 <footer>
   <div class="error" id="error" hidden></div>
+  <div class="hearing" id="hearing"></div>
   <button id="mic">🎤 Start</button>
 </footer>
 
+<div class="overlay" id="syncDialog" hidden>
+  <div class="dialog">
+    <div id="syncSetup">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <h2>🔗 Connect a second phone<br><span style="font-size:16px;font-weight:500">חיבור לטלפון נוסף</span></h2>
+        <p>Each phone listens to its own language. Hebrew spoken here shows in English on the other phone, and English spoken there shows in Hebrew here.</p>
+        <p dir="rtl">כל טלפון מקשיב לשפה שלו. מה שנאמר כאן בעברית יופיע בטלפון השני באנגלית, ומה שנאמר שם באנגלית יופיע כאן בעברית.</p>
+        <button class="big primary" id="createRoom">Create connection / צור חיבור</button>
+        <div class="or">— or enter a code / או הקלידו קוד —</div>
+        <input id="codeInput" maxlength="9" placeholder="XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false">
+        <button class="big" id="joinRoom">Join / הצטרף</button>
+      </div>
+    </div>
+    <div id="syncActive" hidden>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <h2>🔗 Connection / חיבור</h2>
+        <p>Scan this with the other phone, or type the code there.<br><span dir="rtl">סרקו בטלפון השני, או הקלידו שם את הקוד.</span></p>
+        <div class="qr" id="qr"></div>
+        <div class="code" id="codeShow"></div>
+        <p id="peerState" style="text-align:center"></p>
+        <button class="big" id="shareLink">📤 Share link / שלח קישור</button>
+        <button class="big danger" id="leaveRoom">Disconnect / נתק</button>
+      </div>
+    </div>
+    <button id="closeDialog">Close / סגור</button>
+  </div>
+</div>
+
 <script>
 (() => {
+  // ================= basics =================
+  const $ = id => document.getElementById(id);
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const feed = document.getElementById('feed');
-  const emptyEl = document.getElementById('empty');
-  const micBtn = document.getElementById('mic');
-  const dot = document.getElementById('dot');
-  const statusText = document.getElementById('statusText');
-  const errorEl = document.getElementById('error');
-  const speakBtn = document.getElementById('speak');
+  const LANGS = {
+    he: { sr: 'he-IL', tts: ['he', 'iw'], g: 'iw', mm: 'he', dir: 'rtl' },
+    en: { sr: 'en-US', tts: ['en'], g: 'en', mm: 'en', dir: 'ltr' },
+  };
+  const other = l => (l === 'he' ? 'en' : 'he');
+  const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const CLIENT_ID = uid();
 
-  const MAX_LINES = 60;
-  let listening = false;
-  let recognition = null;
-  let interimLine = null;
-  let interimTimer = null;
-  let interimSeq = 0;
-  let speakOn = false;
-  let wakeLock = null;
-  const cache = new Map();
-
-  // ---------- settings ----------
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
-    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+    del(k) { try { localStorage.removeItem(k); } catch {} },
   };
+
+  const feed = $('feed'), emptyEl = $('empty'), micBtn = $('mic'), errorEl = $('error');
+  const MAX_LINES = 80;
+
+  let myLang = store.get('myLang', 'he');
   let fontSize = store.get('fontSize', 34);
+  let speakOn = store.get('speak', false);
+
+  function showError(msg) { errorEl.textContent = msg || ''; errorEl.hidden = !msg; }
+
+  // ================= settings UI =================
   const applyFont = () => document.documentElement.style.setProperty('--font-size', fontSize + 'px');
   applyFont();
-  document.getElementById('bigger').onclick = () => { fontSize = Math.min(80, fontSize + 4); applyFont(); store.set('fontSize', fontSize); };
-  document.getElementById('smaller').onclick = () => { fontSize = Math.max(18, fontSize - 4); applyFont(); store.set('fontSize', fontSize); };
+  $('bigger').onclick = () => { fontSize = Math.min(80, fontSize + 4); applyFont(); store.set('fontSize', fontSize); };
+  $('smaller').onclick = () => { fontSize = Math.max(18, fontSize - 4); applyFont(); store.set('fontSize', fontSize); };
 
-  speakOn = store.get('speak', false);
-  const renderSpeak = () => { speakBtn.classList.toggle('on', speakOn); speakBtn.textContent = speakOn ? '🔊 Speak' : '🔈 Speak'; };
+  const renderSpeak = () => { $('speak').classList.toggle('on', speakOn); $('speak').textContent = speakOn ? '🔊' : '🔈'; };
   renderSpeak();
-  speakBtn.onclick = () => { speakOn = !speakOn; store.set('speak', speakOn); renderSpeak(); if (!speakOn) speechSynthesis.cancel(); };
+  $('speak').onclick = () => {
+    speakOn = !speakOn; store.set('speak', speakOn); renderSpeak();
+    if (!speakOn) speechSynthesis.cancel();
+    else speechSynthesis.speak(new SpeechSynthesisUtterance('')); // unlocks audio on iOS
+  };
 
-  document.getElementById('clear').onclick = () => {
+  function renderLang() {
+    document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b.dataset.lang === myLang));
+    renderEmpty();
+  }
+  document.querySelectorAll('.seg button').forEach(b => b.onclick = () => setLang(b.dataset.lang));
+  function setLang(l) {
+    if (l === myLang) return;
+    myLang = l; store.set('myLang', l);
+    renderLang();
+    if (listening) { flush(); restartRecognition(); }
+    sendPresence();
+  }
+
+  $('clear').onclick = () => {
     feed.querySelectorAll('.line').forEach(n => n.remove());
-    interimLine = null;
     emptyEl.hidden = false;
   };
 
-  function showError(msg) { errorEl.textContent = msg; errorEl.hidden = !msg; }
-
-  // ---------- translation ----------
-  // 1) Chrome's on-device Translator API when available (fast, offline).
-  // 2) Fallback: Google Translate public endpoint.
-  let localTranslator = null;
-  async function initLocalTranslator() {
-    try {
-      if (!('Translator' in self)) return;
-      const opts = { sourceLanguage: 'he', targetLanguage: 'en' };
-      const avail = await Translator.availability(opts);
-      if (avail === 'unavailable') return;
-      localTranslator = await Translator.create(opts);
-    } catch { localTranslator = null; }
+  function renderEmpty() {
+    const inSync = !!sync.room;
+    if (myLang === 'he') {
+      emptyEl.innerHTML = inSync
+        ? '<div dir="rtl">לחצו Start ודברו בעברית.<br>מה שנאמר בטלפון השני באנגלית יופיע כאן בעברית.</div>'
+        : '<div dir="rtl">לחצו Start ודברו בעברית.<br>התרגום לאנגלית יופיע כאן אחרי כל משפט.</div>'
+          + '<div>Press Start. Hebrew speech will appear here in English, sentence by sentence.</div>';
+    } else {
+      emptyEl.innerHTML = inSync
+        ? '<div>Press Start and speak English.<br>Hebrew from the other phone will appear here in English.</div>'
+        : '<div>Press Start and speak English.<br>Each sentence will appear here in Hebrew.</div>';
+    }
   }
 
-  async function translate(text) {
-    text = text.trim();
-    if (!text) return '';
-    if (cache.has(text)) return cache.get(text);
-    let out = '';
-    if (localTranslator) {
-      try { out = await localTranslator.translate(text); } catch { out = ''; }
+  // ================= translation =================
+  const cache = new Map();
+  const localTranslators = {};
+
+  async function googleTranslate(text, from, to) {
+    const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&dt=t'
+      + '&sl=' + LANGS[from].g + '&tl=' + LANGS[to].g + '&q=' + encodeURIComponent(text);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('google ' + res.status);
+    const data = await res.json();
+    const out = (data[0] || []).map(p => p[0]).join('');
+    if (!out) throw new Error('google empty');
+    return out;
+  }
+
+  async function onDeviceTranslate(text, from, to) {
+    if (!('Translator' in self)) throw new Error('no on-device translator');
+    const k = from + to;
+    if (!localTranslators[k]) localTranslators[k] = Translator.create({ sourceLanguage: from, targetLanguage: to });
+    return (await localTranslators[k]).translate(text);
+  }
+
+  async function myMemoryTranslate(text, from, to) {
+    const res = await fetch('https://api.mymemory.translated.net/get?langpair=' + LANGS[from].mm + '|' + LANGS[to].mm
+      + '&q=' + encodeURIComponent(text));
+    if (!res.ok) throw new Error('mymemory ' + res.status);
+    const out = (await res.json()).responseData.translatedText;
+    if (!out) throw new Error('mymemory empty');
+    return out;
+  }
+
+  // Whole sentences only: translating a full sentence lets the engine use the context
+  // (gender, word order, idioms) instead of translating word by word.
+  async function translate(text, from, to) {
+    const key = from + to + text;
+    if (cache.has(key)) return cache.get(key);
+    let out = null, lastErr;
+    for (const fn of [googleTranslate, onDeviceTranslate, myMemoryTranslate]) {
+      try { out = await fn(text, from, to); break; } catch (e) { lastErr = e; }
     }
-    if (!out) {
-      try {
-        const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=iw&tl=en&dt=t&q=' + encodeURIComponent(text);
-        const res = await fetch(url);
-        if (!res.ok) throw new Error('Translation failed (' + res.status + ')');
-        const data = await res.json();
-        out = (data[0] || []).map(p => p[0]).join('');
-      } catch {
-        // Backup service.
-        const res = await fetch('https://api.mymemory.translated.net/get?langpair=he|en&q=' + encodeURIComponent(text));
-        if (!res.ok) throw new Error('Translation failed (' + res.status + ')');
-        out = (await res.json()).responseData.translatedText || '';
-      }
-    }
-    cache.set(text, out);
+    if (!out) throw lastErr;
+    cache.set(key, out);
     if (cache.size > 500) cache.delete(cache.keys().next().value);
     return out;
   }
 
-  // ---------- UI lines ----------
-  function makeLine(interim) {
+  // ================= speech output =================
+  let ttsBusy = false, ttsTimer = null;
+  function speak(text, lang) {
+    if (!speakOn || !text || !('speechSynthesis' in window)) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = LANGS[lang].sr;
+    const voice = speechSynthesis.getVoices().find(v => LANGS[lang].tts.some(p => v.lang.toLowerCase().startsWith(p)));
+    if (voice) u.voice = voice;
+    // While the phone talks, ignore the microphone so it doesn't translate itself.
+    u.onstart = () => { clearTimeout(ttsTimer); ttsBusy = true; };
+    u.onend = u.onerror = () => {
+      clearTimeout(ttsTimer);
+      ttsTimer = setTimeout(() => { if (!speechSynthesis.speaking) ttsBusy = false; }, 500);
+    };
+    speechSynthesis.speak(u);
+  }
+
+  // ================= conversation lines =================
+  function addLine(m) {
     emptyEl.hidden = true;
     const div = document.createElement('div');
-    div.className = 'line' + (interim ? ' interim' : '');
-    div.innerHTML = '<div class="en"></div><div class="he"></div>';
+    div.innerHTML = '<div class="main"></div><div class="sub"></div>';
     feed.appendChild(div);
     const lines = feed.querySelectorAll('.line');
-    if (lines.length > MAX_LINES) lines[0].remove();
+    if (lines.length >= MAX_LINES) lines[0].remove();
+    div.className = 'line';
+    renderLine(div, m);
     return div;
   }
-  function scrollDown() { feed.scrollTop = feed.scrollHeight; }
 
-  function updateInterim(hebrew) {
-    if (!interimLine) interimLine = makeLine(true);
-    interimLine.querySelector('.he').textContent = hebrew;
-    scrollDown();
-    // Throttle interim translations so the caregiver sees words as they are spoken.
-    clearTimeout(interimTimer);
-    const seq = ++interimSeq;
-    interimTimer = setTimeout(async () => {
-      try {
-        const en = await translate(hebrew);
-        if (seq === interimSeq && interimLine) {
-          interimLine.querySelector('.en').textContent = en;
-          scrollDown();
-        }
-      } catch {}
-    }, 250);
-  }
+  function setText(el, text, lang) { el.textContent = text || ''; el.dir = lang ? LANGS[lang].dir : 'auto'; }
 
-  async function commitFinal(hebrew) {
-    clearTimeout(interimTimer);
-    interimSeq++;
-    const line = interimLine || makeLine(false);
-    interimLine = null;
-    line.querySelector('.he').textContent = hebrew;
-    try {
-      const en = await translate(hebrew);
-      line.querySelector('.en').textContent = en;
-      line.classList.remove('interim');
-      showError('');
-      if (speakOn && en) {
-        const u = new SpeechSynthesisUtterance(en);
-        u.lang = 'en-US';
-        speechSynthesis.speak(u);
-      }
-    } catch (e) {
-      line.classList.remove('interim');
-      line.querySelector('.en').textContent = '⚠️ ' + hebrew;
-      showError('בעיה בתרגום — בדקו חיבור לאינטרנט.');
+  function renderLine(div, m) {
+    const main = div.querySelector('.main'), sub = div.querySelector('.sub');
+    const chat = !!sync.room;
+    div.className = 'line ' + (m.mine ? 'mine' : 'theirs') + (m.mine && chat ? ' chat' : '');
+    div.classList.toggle('pending', !m.shown);
+    if (m.mine && chat) {
+      // Two-phone mode: my own sentence small, with what the other phone received below it.
+      setText(main, m.text, m.lang);
+      setText(sub, m.translation ? m.translation : (m.failed ? '⚠️' : '…'), m.tlang);
+    } else {
+      setText(main, m.shown || (m.failed ? '⚠️ ' + m.text : '…'), m.shown ? m.shownLang : m.lang);
+      setText(sub, m.text, m.lang);
     }
-    scrollDown();
+    feed.scrollTop = feed.scrollHeight;
   }
 
-  // ---------- speech recognition ----------
-  function setStatus(on, text) {
-    dot.classList.toggle('on', on);
-    statusText.textContent = text;
+  // A sentence spoken into this phone.
+  async function handleMySentence(text) {
+    const m = { id: uid(), mine: true, lang: myLang, tlang: other(myLang), text, translation: null };
+    const div = addLine(m);
+    try {
+      m.translation = await translate(text, m.lang, m.tlang);
+      m.shown = m.translation; m.shownLang = m.tlang;
+      showError('');
+    } catch {
+      m.failed = true;
+      showError('Translation problem, check the internet connection / בעיה בתרגום, בדקו חיבור לאינטרנט');
+    }
+    renderLine(div, m);
+    if (sync.room) publish({ type: 'msg', id: m.id, lang: m.lang, text: m.text, tlang: m.tlang, translation: m.translation });
+    else speak(m.translation, m.tlang);
   }
 
+  // A sentence that arrived from the other phone.
+  const seen = new Set();
+  async function handleIncoming(p) {
+    if (seen.has(p.id)) return;
+    seen.add(p.id);
+    const m = { id: p.id, mine: false, lang: p.lang, text: p.text };
+    if (p.translation && p.tlang === myLang) { m.shown = p.translation; m.shownLang = myLang; }
+    else if (p.lang === myLang) { m.shown = p.text; m.shownLang = myLang; }
+    const div = addLine(m);
+    if (!m.shown) {
+      try { m.shown = await translate(p.text, p.lang, myLang); m.shownLang = myLang; }
+      catch { m.failed = true; }
+      renderLine(div, m);
+    }
+    if (m.shown) speak(m.shown, myLang);
+  }
+
+  // ================= speech recognition =================
+  // The recognizer delivers speech in small pieces. Collect them and only translate
+  // once the speaker pauses, so every translation is a full sentence.
+  const PAUSE_MS = 1100;       // silence that ends a sentence
+  const MAX_WAIT_MS = 4000;    // don't wait forever while someone keeps talking
+  let listening = false, recognition = null;
+  let pending = '', flushTimer = null, firstPieceAt = 0;
+
+  function setStatus(on, text) { $('dot').classList.toggle('on', on); $('statusText').textContent = text; }
+  function setHearing(on) { $('hearing').innerHTML = on ? '<span>● ● ●</span>' : ''; }
+
+  function addPiece(t) {
+    t = t.trim();
+    if (!t) return;
+    // Some Android versions resend the whole phrase so far; don't duplicate it.
+    if (pending && t.startsWith(pending)) pending = t;
+    else if (pending.endsWith(t)) return;
+    else pending = pending ? pending + ' ' + t : t;
+    if (!firstPieceAt) firstPieceAt = Date.now();
+  }
+
+  function scheduleFlush(stillTalking) {
+    clearTimeout(flushTimer);
+    if (!pending) return;
+    const waited = Date.now() - firstPieceAt;
+    const delay = stillTalking ? Math.max(0, MAX_WAIT_MS - waited) : PAUSE_MS;
+    flushTimer = setTimeout(flush, delay);
+  }
+
+  function flush() {
+    clearTimeout(flushTimer);
+    const text = pending.trim();
+    pending = ''; firstPieceAt = 0;
+    setHearing(false);
+    if (text) handleMySentence(text);
+  }
+
+  function buildRecognition() {
+    const r = new SR();
+    r.lang = LANGS[myLang].sr;
+    r.continuous = true;
+    r.interimResults = true;
+    r.maxAlternatives = 1;
+    r.onstart = () => setStatus(true, myLang === 'he' ? 'מקשיב לעברית…' : 'Listening to English…');
+    r.onresult = ev => {
+      if (ttsBusy) return;
+      let talking = false;
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const res = ev.results[i];
+        if (res.isFinal) addPiece(res[0].transcript);
+        else if (res[0].transcript.trim()) talking = true;
+      }
+      setHearing(talking || !!pending);
+      scheduleFlush(talking);
+    };
+    r.onerror = ev => {
+      if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+        showError('Microphone blocked, allow it in the browser / אין הרשאה למיקרופון, אשרו גישה בדפדפן');
+        stop();
+      } else if (ev.error !== 'no-speech' && ev.error !== 'aborted') {
+        showError('Speech error: ' + ev.error);
+      }
+    };
+    // Browsers stop listening after silence, so restart automatically.
+    r.onend = () => {
+      if (pending) scheduleFlush(false);
+      if (listening && recognition === r) {
+        try { r.start(); } catch { setTimeout(() => { if (listening && recognition === r) try { r.start(); } catch {} }, 300); }
+      } else if (!listening) {
+        setStatus(false, 'Stopped');
+      }
+    };
+    return r;
+  }
+
+  function restartRecognition() {
+    const old = recognition;
+    recognition = buildRecognition();
+    if (old) try { old.abort(); } catch {}
+    try { recognition.start(); } catch {}
+  }
+
+  let wakeLock = null;
   async function requestWakeLock() {
     try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch {}
   }
@@ -225,68 +429,202 @@
     if (listening && document.visibilityState === 'visible') requestWakeLock();
   });
 
-  function buildRecognition() {
-    const r = new SR();
-    r.lang = 'he-IL';
-    r.continuous = true;
-    r.interimResults = true;
-    r.maxAlternatives = 1;
-
-    r.onstart = () => setStatus(true, 'Listening…');
-    r.onresult = (ev) => {
-      let interim = '';
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        const res = ev.results[i];
-        const t = res[0].transcript;
-        if (res.isFinal) commitFinal(t);
-        else interim += t;
-      }
-      if (interim.trim()) updateInterim(interim);
-    };
-    r.onerror = (ev) => {
-      if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
-        showError('אין הרשאה למיקרופון. אשרו גישה למיקרופון בדפדפן ונסו שוב.');
-        stop();
-      } else if (ev.error !== 'no-speech' && ev.error !== 'aborted') {
-        showError('שגיאת זיהוי דיבור: ' + ev.error);
-      }
-    };
-    // The browser stops recognition after silence — restart automatically.
-    r.onend = () => {
-      if (listening) {
-        try { r.start(); } catch { setTimeout(() => listening && r.start(), 300); }
-      } else {
-        setStatus(false, 'Stopped');
-      }
-    };
-    return r;
-  }
-
   function start() {
     if (!SR) {
-      showError('הדפדפן לא תומך בזיהוי דיבור. השתמשו ב-Google Chrome (אנדרואיד/מחשב) או Safari (אייפון).');
+      showError('This browser has no speech recognition. Use Chrome (Android/PC) or Safari (iPhone). / הדפדפן לא תומך, השתמשו ב-Chrome או Safari');
       return;
     }
     showError('');
     listening = true;
     micBtn.classList.add('listening');
     micBtn.textContent = '⏹ Stop';
-    recognition = recognition || buildRecognition();
-    try { recognition.start(); } catch {}
+    restartRecognition();
     requestWakeLock();
   }
 
   function stop() {
     listening = false;
+    flush();
     micBtn.classList.remove('listening');
     micBtn.textContent = '🎤 Start';
     if (recognition) try { recognition.stop(); } catch {}
     if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
     setStatus(false, 'Stopped');
   }
-
   micBtn.onclick = () => (listening ? stop() : start());
-  initLocalTranslator();
+
+  // ================= two-phone sync =================
+  // Phones talk through public MQTT brokers (two at once, for reliability).
+  // Everything is end-to-end encrypted with a key derived from the room code,
+  // so the brokers only ever see scrambled bytes.
+  const BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt'];
+  const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const sync = { room: null, topic: null, key: null, clients: [], peerSeen: 0, pingTimer: null };
+
+  const loaded = {};
+  function loadScript(src) {
+    return loaded[src] || (loaded[src] = new Promise((ok, fail) => {
+      const s = document.createElement('script');
+      s.src = src; s.onload = ok; s.onerror = () => { delete loaded[src]; fail(new Error('load ' + src)); };
+      document.head.appendChild(s);
+    }));
+  }
+
+  function newCode() {
+    const b = crypto.getRandomValues(new Uint8Array(8));
+    return Array.from(b, x => CODE_CHARS[x % CODE_CHARS.length]).join('');
+  }
+  const normCode = c => (c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const prettyCode = c => c.slice(0, 4) + '-' + c.slice(4);
+
+  async function deriveRoom(code) {
+    const enc = new TextEncoder();
+    const h = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode('ct-topic:' + code)));
+    const topic = 'caregiver-translator/v1/' + Array.from(h.slice(0, 16), x => x.toString(16).padStart(2, '0')).join('');
+    const base = await crypto.subtle.importKey('raw', enc.encode(code), 'PBKDF2', false, ['deriveKey']);
+    const key = await crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt: enc.encode('caregiver-translator-v1'), iterations: 200000, hash: 'SHA-256' },
+      base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    return { topic, key };
+  }
+
+  async function encrypt(obj) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, sync.key,
+      new TextEncoder().encode(JSON.stringify(obj))));
+    const out = new Uint8Array(12 + ct.length);
+    out.set(iv); out.set(ct, 12);
+    return out;
+  }
+
+  async function decrypt(bytes) {
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes.slice(0, 12) }, sync.key, bytes.slice(12));
+    return JSON.parse(new TextDecoder().decode(pt));
+  }
+
+  async function publish(obj) {
+    if (!sync.room) return;
+    const payload = await encrypt({ ...obj, from: CLIENT_ID });
+    sync.clients.forEach(c => { if (c.connected) c.publish(sync.topic, payload, { qos: 1 }); });
+  }
+
+  function sendPresence(reply) {
+    if (sync.room) publish({ type: reply ? 'pong' : 'ping', lang: myLang });
+  }
+
+  async function onMessage(bytes) {
+    let p;
+    try { p = await decrypt(new Uint8Array(bytes)); } catch { return; }
+    if (!p || p.from === CLIENT_ID) return;
+    const wasOnline = peerOnline();
+    sync.peerSeen = Date.now();
+    if (p.type === 'ping' && !wasOnline) sendPresence(true);
+    if (p.type === 'msg') handleIncoming(p);
+    renderSync();
+  }
+
+  const peerOnline = () => Date.now() - sync.peerSeen < 35000;
+
+  async function joinRoom(code) {
+    code = normCode(code);
+    if (code.length !== 8) { alert('The code has 8 characters / הקוד צריך להיות 8 תווים'); return; }
+    leaveRoom(true);
+    $('syncBadge').hidden = false;
+    $('syncBadge').textContent = '🔗 …';
+    try {
+      await loadScript('https://cdn.jsdelivr.net/npm/mqtt@5.16.0/dist/mqtt.min.js');
+      Object.assign(sync, await deriveRoom(code));
+    } catch {
+      showError('Could not start the connection, check the internet / לא ניתן להתחבר, בדקו אינטרנט');
+      $('syncBadge').hidden = true;
+      return;
+    }
+    sync.room = code;
+    store.set('room', code);
+    sync.clients = BROKERS.map(url => {
+      const c = mqtt.connect(url, { clientId: 'ct_' + uid(), reconnectPeriod: 3000, connectTimeout: 10000, clean: true });
+      c.on('connect', () => { c.subscribe(sync.topic, { qos: 1 }); sendPresence(); renderSync(); });
+      c.on('message', (t, msg) => onMessage(msg));
+      c.on('close', renderSync);
+      c.on('error', () => {});
+      return c;
+    });
+    clearInterval(sync.pingTimer);
+    sync.pingTimer = setInterval(() => { sendPresence(); renderSync(); }, 10000);
+    // Re-render existing lines in chat layout.
+    feed.querySelectorAll('.line').forEach(n => n.remove());
+    emptyEl.hidden = false;
+    renderEmpty();
+    renderSync();
+  }
+
+  function leaveRoom(silent) {
+    sync.clients.forEach(c => { try { c.end(true); } catch {} });
+    sync.clients = [];
+    clearInterval(sync.pingTimer);
+    sync.room = null; sync.key = null; sync.peerSeen = 0;
+    if (!silent) { store.del('room'); renderEmpty(); }
+    renderSync();
+  }
+
+  function joinLink() {
+    return location.origin + location.pathname + '#join=' + sync.room + '&lang=' + other(myLang);
+  }
+
+  async function renderSync() {
+    const badge = $('syncBadge');
+    $('syncBtn').classList.toggle('on', !!sync.room);
+    $('syncSetup').hidden = !!sync.room;
+    $('syncActive').hidden = !sync.room;
+    if (!sync.room) { badge.hidden = true; return; }
+    const net = sync.clients.some(c => c.connected);
+    const peer = peerOnline();
+    badge.hidden = false;
+    badge.classList.toggle('ok', peer);
+    badge.textContent = !net ? '🔗 connecting… / מתחבר' : peer ? '🔗 connected / מחובר' : '🔗 waiting for other phone / ממתין';
+    $('peerState').textContent = !net ? 'Connecting… / מתחבר…'
+      : peer ? '✅ The other phone is connected / הטלפון השני מחובר' : '⏳ Waiting for the other phone… / ממתין לטלפון השני…';
+    $('codeShow').textContent = prettyCode(sync.room);
+    const qrBox = $('qr');
+    if (qrBox.dataset.room !== sync.room + myLang) {
+      try {
+        await loadScript('https://cdn.jsdelivr.net/npm/qrcode-generator@2.0.4/dist/qrcode.js');
+        const q = qrcode(0, 'M');
+        q.addData(joinLink());
+        q.make();
+        qrBox.innerHTML = q.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+        qrBox.dataset.room = sync.room + myLang;
+      } catch { qrBox.textContent = ''; }
+    }
+  }
+
+  $('syncBtn').onclick = () => { $('syncDialog').hidden = false; renderSync(); };
+  $('closeDialog').onclick = () => { $('syncDialog').hidden = true; };
+  $('syncDialog').onclick = e => { if (e.target === $('syncDialog')) $('syncDialog').hidden = true; };
+  $('createRoom').onclick = () => joinRoom(newCode());
+  $('joinRoom').onclick = () => { joinRoom($('codeInput').value); $('syncDialog').hidden = true; };
+  $('codeInput').onkeydown = e => { if (e.key === 'Enter') $('joinRoom').click(); };
+  $('leaveRoom').onclick = () => { leaveRoom(false); $('syncDialog').hidden = true; };
+  $('shareLink').onclick = async () => {
+    const url = joinLink();
+    try {
+      if (navigator.share) await navigator.share({ title: 'Live Translator', url });
+      else { await navigator.clipboard.writeText(url); alert('Link copied / הקישור הועתק'); }
+    } catch {}
+  };
+
+  // ================= startup =================
+  renderLang();
+  const hash = new URLSearchParams(location.hash.slice(1));
+  if (hash.get('join')) {
+    const l = hash.get('lang');
+    if (l === 'he' || l === 'en') { myLang = l; store.set('myLang', l); renderLang(); }
+    history.replaceState(null, '', location.pathname + location.search);
+    joinRoom(hash.get('join'));
+  } else if (store.get('room', null)) {
+    joinRoom(store.get('room', null));
+  }
+  if ('speechSynthesis' in window) speechSynthesis.getVoices();
 })();
 </script>
 </body>
