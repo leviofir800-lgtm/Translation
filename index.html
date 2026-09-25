@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111418">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Live Translator</title>
+<style>
+  :root {
+    --bg: #111418;
+    --panel: #1b2027;
+    --text: #f4f6f8;
+    --muted: #8a94a3;
+    --accent: #2f9e6e;
+    --accent-stop: #d64545;
+    --interim: #9fb3c8;
+    --font-size: 34px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  body { display: flex; flex-direction: column; }
+
+  header { display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+    background: var(--panel); flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0 auto 0 0; font-weight: 600; }
+  .status { font-size: 14px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+  .dot.on { background: #3ddc84; animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  button, select { font: inherit; font-size: 15px; border: 0; border-radius: 10px;
+    padding: 8px 12px; background: #2a313b; color: var(--text); cursor: pointer; }
+  button.on { background: var(--accent); }
+
+  #feed { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  .line { background: var(--panel); border-radius: 14px; padding: 12px 16px; }
+  .line .en { font-size: var(--font-size); line-height: 1.25; font-weight: 600; }
+  .line .he { font-size: 15px; color: var(--muted); direction: rtl; text-align: right; margin-top: 6px; }
+  .line.interim .en { color: var(--interim); }
+  .empty { margin: auto; text-align: center; color: var(--muted); font-size: 20px; line-height: 1.6; }
+  .empty .he { direction: rtl; }
+
+  footer { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: var(--panel); }
+  #mic { width: 100%; font-size: 22px; padding: 16px; border-radius: 14px;
+    background: var(--accent); font-weight: 700; }
+  #mic.listening { background: var(--accent-stop); }
+  .error { color: #ff8a8a; font-size: 14px; margin-bottom: 8px; direction: rtl; text-align: right; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🇮🇱 → 🇬🇧 Live Translator</h1>
+  <div class="status"><span class="dot" id="dot"></span><span id="statusText">Stopped</span></div>
+  <button id="smaller" title="Smaller text">A−</button>
+  <button id="bigger" title="Larger text">A+</button>
+  <button id="speak" title="Read English aloud">🔈 Speak</button>
+  <button id="clear" title="Clear">Clear</button>
+</header>
+
+<main id="feed">
+  <div class="empty" id="empty">
+    <div class="he">לחצו על "Start" והתחילו לדבר בעברית.<br>התרגום לאנגלית יופיע כאן מיד.</div>
+    <div>Press "Start" — Hebrew speech will appear here translated to English.</div>
+  </div>
+</main>
+
+<footer>
+  <div class="error" id="error" hidden></div>
+  <button id="mic">🎤 Start</button>
+</footer>
+
+<script>
+(() => {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const feed = document.getElementById('feed');
+  const emptyEl = document.getElementById('empty');
+  const micBtn = document.getElementById('mic');
+  const dot = document.getElementById('dot');
+  const statusText = document.getElementById('statusText');
+  const errorEl = document.getElementById('error');
+  const speakBtn = document.getElementById('speak');
+
+  const MAX_LINES = 60;
+  let listening = false;
+  let recognition = null;
+  let interimLine = null;
+  let interimTimer = null;
+  let interimSeq = 0;
+  let speakOn = false;
+  let wakeLock = null;
+  const cache = new Map();
+
+  // ---------- settings ----------
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+  };
+  let fontSize = store.get('fontSize', 34);
+  const applyFont = () => document.documentElement.style.setProperty('--font-size', fontSize + 'px');
+  applyFont();
+  document.getElementById('bigger').onclick = () => { fontSize = Math.min(80, fontSize + 4); applyFont(); store.set('fontSize', fontSize); };
+  document.getElementById('smaller').onclick = () => { fontSize = Math.max(18, fontSize - 4); applyFont(); store.set('fontSize', fontSize); };
+
+  speakOn = store.get('speak', false);
+  const renderSpeak = () => { speakBtn.classList.toggle('on', speakOn); speakBtn.textContent = speakOn ? '🔊 Speak' : '🔈 Speak'; };
+  renderSpeak();
+  speakBtn.onclick = () => { speakOn = !speakOn; store.set('speak', speakOn); renderSpeak(); if (!speakOn) speechSynthesis.cancel(); };
+
+  document.getElementById('clear').onclick = () => {
+    feed.querySelectorAll('.line').forEach(n => n.remove());
+    interimLine = null;
+    emptyEl.hidden = false;
+  };
+
+  function showError(msg) { errorEl.textContent = msg; errorEl.hidden = !msg; }
+
+  // ---------- translation ----------
+  // 1) Chrome's on-device Translator API when available (fast, offline).
+  // 2) Fallback: Google Translate public endpoint.
+  let localTranslator = null;
+  async function initLocalTranslator() {
+    try {
+      if (!('Translator' in self)) return;
+      const opts = { sourceLanguage: 'he', targetLanguage: 'en' };
+      const avail = await Translator.availability(opts);
+      if (avail === 'unavailable') return;
+      localTranslator = await Translator.create(opts);
+    } catch { localTranslator = null; }
+  }
+
+  async function translate(text) {
+    text = text.trim();
+    if (!text) return '';
+    if (cache.has(text)) return cache.get(text);
+    let out = '';
+    if (localTranslator) {
+      try { out = await localTranslator.translate(text); } catch { out = ''; }
+    }
+    if (!out) {
+      try {
+        const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=iw&tl=en&dt=t&q=' + encodeURIComponent(text);
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('Translation failed (' + res.status + ')');
+        const data = await res.json();
+        out = (data[0] || []).map(p => p[0]).join('');
+      } catch {
+        // Backup service.
+        const res = await fetch('https://api.mymemory.translated.net/get?langpair=he|en&q=' + encodeURIComponent(text));
+        if (!res.ok) throw new Error('Translation failed (' + res.status + ')');
+        out = (await res.json()).responseData.translatedText || '';
+      }
+    }
+    cache.set(text, out);
+    if (cache.size > 500) cache.delete(cache.keys().next().value);
+    return out;
+  }
+
+  // ---------- UI lines ----------
+  function makeLine(interim) {
+    emptyEl.hidden = true;
+    const div = document.createElement('div');
+    div.className = 'line' + (interim ? ' interim' : '');
+    div.innerHTML = '<div class="en"></div><div class="he"></div>';
+    feed.appendChild(div);
+    const lines = feed.querySelectorAll('.line');
+    if (lines.length > MAX_LINES) lines[0].remove();
+    return div;
+  }
+  function scrollDown() { feed.scrollTop = feed.scrollHeight; }
+
+  function updateInterim(hebrew) {
+    if (!interimLine) interimLine = makeLine(true);
+    interimLine.querySelector('.he').textContent = hebrew;
+    scrollDown();
+    // Throttle interim translations so the caregiver sees words as they are spoken.
+    clearTimeout(interimTimer);
+    const seq = ++interimSeq;
+    interimTimer = setTimeout(async () => {
+      try {
+        const en = await translate(hebrew);
+        if (seq === interimSeq && interimLine) {
+          interimLine.querySelector('.en').textContent = en;
+          scrollDown();
+        }
+      } catch {}
+    }, 250);
+  }
+
+  async function commitFinal(hebrew) {
+    clearTimeout(interimTimer);
+    interimSeq++;
+    const line = interimLine || makeLine(false);
+    interimLine = null;
+    line.querySelector('.he').textContent = hebrew;
+    try {
+      const en = await translate(hebrew);
+      line.querySelector('.en').textContent = en;
+      line.classList.remove('interim');
+      showError('');
+      if (speakOn && en) {
+        const u = new SpeechSynthesisUtterance(en);
+        u.lang = 'en-US';
+        speechSynthesis.speak(u);
+      }
+    } catch (e) {
+      line.classList.remove('interim');
+      line.querySelector('.en').textContent = '⚠️ ' + hebrew;
+      showError('בעיה בתרגום — בדקו חיבור לאינטרנט.');
+    }
+    scrollDown();
+  }
+
+  // ---------- speech recognition ----------
+  function setStatus(on, text) {
+    dot.classList.toggle('on', on);
+    statusText.textContent = text;
+  }
+
+  async function requestWakeLock() {
+    try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch {}
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (listening && document.visibilityState === 'visible') requestWakeLock();
+  });
+
+  function buildRecognition() {
+    const r = new SR();
+    r.lang = 'he-IL';
+    r.continuous = true;
+    r.interimResults = true;
+    r.maxAlternatives = 1;
+
+    r.onstart = () => setStatus(true, 'Listening…');
+    r.onresult = (ev) => {
+      let interim = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const res = ev.results[i];
+        const t = res[0].transcript;
+        if (res.isFinal) commitFinal(t);
+        else interim += t;
+      }
+      if (interim.trim()) updateInterim(interim);
+    };
+    r.onerror = (ev) => {
+      if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+        showError('אין הרשאה למיקרופון. אשרו גישה למיקרופון בדפדפן ונסו שוב.');
+        stop();
+      } else if (ev.error !== 'no-speech' && ev.error !== 'aborted') {
+        showError('שגיאת זיהוי דיבור: ' + ev.error);
+      }
+    };
+    // The browser stops recognition after silence — restart automatically.
+    r.onend = () => {
+      if (listening) {
+        try { r.start(); } catch { setTimeout(() => listening && r.start(), 300); }
+      } else {
+        setStatus(false, 'Stopped');
+      }
+    };
+    return r;
+  }
+
+  function start() {
+    if (!SR) {
+      showError('הדפדפן לא תומך בזיהוי דיבור. השתמשו ב-Google Chrome (אנדרואיד/מחשב) או Safari (אייפון).');
+      return;
+    }
+    showError('');
+    listening = true;
+    micBtn.classList.add('listening');
+    micBtn.textContent = '⏹ Stop';
+    recognition = recognition || buildRecognition();
+    try { recognition.start(); } catch {}
+    requestWakeLock();
+  }
+
+  function stop() {
+    listening = false;
+    micBtn.classList.remove('listening');
+    micBtn.textContent = '🎤 Start';
+    if (recognition) try { recognition.stop(); } catch {}
+    if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+    setStatus(false, 'Stopped');
+  }
+
+  micBtn.onclick = () => (listening ? stop() : start());
+  initLocalTranslator();
+})();
+</script>
+</body>
+</html>
