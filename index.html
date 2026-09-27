@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#111418">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Live Translator</title>
+<title>Live Translator · עברית · English · ไทย</title>
 <style>
   :root {
     --bg: #111418;
@@ -39,12 +39,17 @@
   button { padding: 8px 12px; background: var(--panel-2); cursor: pointer; }
   button.on { background: var(--accent); }
   .seg { display: inline-flex; background: var(--panel-2); border-radius: 10px; padding: 3px; }
-  .seg button { padding: 6px 12px; background: transparent; border-radius: 8px; }
+  .seg button { padding: 6px 10px; background: transparent; border-radius: 8px; }
   .seg button.on { background: var(--accent); }
+  .seg.locked { opacity: .55; pointer-events: none; }
+  .to-group { display: inline-flex; align-items: center; gap: 8px; }
+  .arrow { color: var(--muted); font-size: 18px; }
+  [lang="th"] { line-height: 1.55; }
   .tools { margin-left: auto; display: flex; gap: 6px; }
 
   #feed { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-  .line { background: var(--panel); border-radius: 16px; padding: 12px 16px; max-width: 100%; }
+  .line { background: var(--panel); border-radius: 16px; padding: 12px 16px; max-width: 100%; cursor: pointer; }
+  .line:active { filter: brightness(1.25); }
   .line .main { font-size: var(--font-size); line-height: 1.3; font-weight: 600; overflow-wrap: anywhere; }
   .line .sub { font-size: 15px; color: var(--muted); margin-top: 6px; overflow-wrap: anywhere; }
   .line.pending .main { color: var(--muted); }
@@ -85,10 +90,19 @@
     <span class="sync-badge" id="syncBadge" hidden></span>
   </div>
   <div class="row">
-    <div class="seg" title="Language spoken into this phone / השפה שמדברים לטלפון הזה">
+    <div class="seg" id="fromSeg" title="Language spoken into this phone / השפה שמדברים לטלפון הזה / ภาษาที่พูดใส่โทรศัพท์เครื่องนี้">
       <button data-lang="he">🎤 עברית</button>
       <button data-lang="en">🎤 English</button>
+      <button data-lang="th">🎤 ไทย</button>
     </div>
+    <span class="to-group"><span class="arrow">→</span>
+    <div class="seg" id="toSeg" title="Translate into / לתרגם ל / แปลเป็น">
+      <button data-to="he">עברית</button>
+      <button data-to="en">English</button>
+      <button data-to="th">ไทย</button>
+    </div></span>
+  </div>
+  <div class="row">
     <div class="tools">
       <button id="smaller" title="Smaller text">A−</button>
       <button id="bigger" title="Larger text">A+</button>
@@ -114,8 +128,9 @@
     <div id="syncSetup">
       <div style="display:flex;flex-direction:column;gap:14px">
         <h2>🔗 Connect a second phone<br><span style="font-size:16px;font-weight:500">חיבור לטלפון נוסף</span></h2>
-        <p>Each phone listens to its own language. Hebrew spoken here shows in English on the other phone, and English spoken there shows in Hebrew here.</p>
-        <p dir="rtl">כל טלפון מקשיב לשפה שלו. מה שנאמר כאן בעברית יופיע בטלפון השני באנגלית, ומה שנאמר שם באנגלית יופיע כאן בעברית.</p>
+        <p>Each phone listens to its own language. What is said here shows on the other phone in its language, and the other way round.</p>
+        <p dir="rtl">כל טלפון מקשיב לשפה שלו. מה שנאמר כאן יופיע בטלפון השני בשפה שלו, ומה שנאמר שם יופיע כאן בשפה שלכם.</p>
+        <p lang="th">โทรศัพท์แต่ละเครื่องฟังภาษาของตัวเอง สิ่งที่พูดที่นี่จะแสดงบนอีกเครื่องเป็นภาษาของเครื่องนั้น และในทางกลับกัน</p>
         <button class="big primary" id="createRoom">Create connection / צור חיבור</button>
         <div class="or">— or enter a code / או הקלידו קוד —</div>
         <input id="codeInput" maxlength="9" placeholder="XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false">
@@ -145,8 +160,41 @@
   const LANGS = {
     he: { sr: 'he-IL', tts: ['he', 'iw'], g: 'iw', mm: 'he', dir: 'rtl' },
     en: { sr: 'en-US', tts: ['en'], g: 'en', mm: 'en', dir: 'ltr' },
+    th: { sr: 'th-TH', tts: ['th'], g: 'th', mm: 'th', dir: 'ltr' },
   };
-  const other = l => (l === 'he' ? 'en' : 'he');
+  // Language names, written in each interface language.
+  const NAME = {
+    he: { he: 'עברית', en: 'אנגלית', th: 'תאית' },
+    en: { he: 'Hebrew', en: 'English', th: 'Thai' },
+    th: { he: 'ภาษาฮีบรู', en: 'ภาษาอังกฤษ', th: 'ภาษาไทย' },
+  };
+  // Screen text in the language of the person holding this phone.
+  const T = {
+    he: {
+      start: l => `לחצו Start ודברו ב${NAME.he[l]}.`,
+      solo: to => `התרגום ל${NAME.he[to]} יופיע כאן אחרי כל משפט.`,
+      tap: 'לחיצה על משפט משמיעה אותו שוב.',
+      synced: l => `מה שנאמר בטלפון השני יופיע כאן ב${NAME.he[l]}.`,
+      listening: l => `מקשיב ל${NAME.he[l]}…`,
+      stopped: 'עצור', connecting: 'מתחבר…', connected: 'מחובר', waiting: 'ממתין לטלפון השני…',
+    },
+    en: {
+      start: l => `Press Start and speak ${NAME.en[l]}.`,
+      solo: to => `Each sentence will appear here in ${NAME.en[to]}.`,
+      tap: 'Tap a sentence to hear it again.',
+      synced: l => `What the other phone hears will appear here in ${NAME.en[l]}.`,
+      listening: l => `Listening to ${NAME.en[l]}…`,
+      stopped: 'Stopped', connecting: 'Connecting…', connected: 'Connected', waiting: 'Waiting for the other phone…',
+    },
+    th: {
+      start: l => `กด Start แล้วพูด${NAME.th[l]}`,
+      solo: to => `คำแปลเป็น${NAME.th[to]}จะแสดงที่นี่ทีละประโยค`,
+      tap: 'แตะที่ประโยคเพื่อฟังอีกครั้ง',
+      synced: l => `สิ่งที่อีกเครื่องได้ยินจะแสดงที่นี่เป็น${NAME.th[l]}`,
+      listening: l => `กำลังฟัง${NAME.th[l]}…`,
+      stopped: 'หยุดแล้ว', connecting: 'กำลังเชื่อมต่อ…', connected: 'เชื่อมต่อแล้ว', waiting: 'กำลังรออีกเครื่อง…',
+    },
+  };
   const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
   const CLIENT_ID = uid();
 
@@ -159,7 +207,11 @@
   const feed = $('feed'), emptyEl = $('empty'), micBtn = $('mic'), errorEl = $('error');
   const MAX_LINES = 80;
 
-  let myLang = store.get('myLang', 'he');
+  const savedLang = store.get('myLang', null);
+  let myLang = LANGS[savedLang] ? savedLang : 'he';
+  // Phones set up before Thai was added keep their Hebrew <-> English pair.
+  let toLang = store.get('toLang', savedLang ? (myLang === 'he' ? 'en' : 'he') : 'th');
+  if (!LANGS[toLang] || toLang === myLang) toLang = myLang === 'th' ? 'he' : 'th';
   let fontSize = store.get('fontSize', 34);
   let speakOn = store.get('speak', false);
 
@@ -179,17 +231,35 @@
     else speechSynthesis.speak(new SpeechSynthesisUtterance('')); // unlocks audio on iOS
   };
 
+  // In two-phone mode the other phone's language decides the translation target.
+  const targetLang = () => (sync.room && sync.peerLang && sync.peerLang !== myLang) ? sync.peerLang : toLang;
+
   function renderLang() {
-    document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b.dataset.lang === myLang));
+    const target = targetLang();
+    document.querySelectorAll('#fromSeg button').forEach(b => b.classList.toggle('on', b.dataset.lang === myLang));
+    document.querySelectorAll('#toSeg button').forEach(b => b.classList.toggle('on', b.dataset.to === target));
+    $('toSeg').classList.toggle('locked', !!(sync.room && sync.peerLang));
+    document.documentElement.lang = myLang;
+    if (!listening) setStatus(false, T[myLang].stopped);
     renderEmpty();
   }
-  document.querySelectorAll('.seg button').forEach(b => b.onclick = () => setLang(b.dataset.lang));
+  document.querySelectorAll('#fromSeg button').forEach(b => b.onclick = () => setLang(b.dataset.lang));
+  document.querySelectorAll('#toSeg button').forEach(b => b.onclick = () => setTo(b.dataset.to));
   function setLang(l) {
     if (l === myLang) return;
+    if (l === toLang) { toLang = myLang; store.set('toLang', toLang); } // picking the target language swaps the pair
     myLang = l; store.set('myLang', l);
     renderLang();
     if (listening) { flush(); restartRecognition(); }
     sendPresence();
+    if (sync.room) renderSync();
+  }
+  function setTo(l) {
+    if (l === toLang) return;
+    if (l === myLang) setLang(toLang);
+    toLang = l; store.set('toLang', l);
+    renderLang();
+    if (sync.room) renderSync();
   }
 
   $('clear').onclick = () => {
@@ -197,18 +267,15 @@
     emptyEl.hidden = false;
   };
 
+  function emptyText(ui) {
+    const t = T[ui];
+    return t.start(myLang) + '<br>' + (sync.room ? t.synced(myLang) : t.solo(targetLang())) + '<br>' + t.tap;
+  }
   function renderEmpty() {
-    const inSync = !!sync.room;
-    if (myLang === 'he') {
-      emptyEl.innerHTML = inSync
-        ? '<div dir="rtl">לחצו Start ודברו בעברית.<br>מה שנאמר בטלפון השני באנגלית יופיע כאן בעברית.</div>'
-        : '<div dir="rtl">לחצו Start ודברו בעברית.<br>התרגום לאנגלית יופיע כאן אחרי כל משפט.</div>'
-          + '<div>Press Start. Hebrew speech will appear here in English, sentence by sentence.</div>';
-    } else {
-      emptyEl.innerHTML = inSync
-        ? '<div>Press Start and speak English.<br>Hebrew from the other phone will appear here in English.</div>'
-        : '<div>Press Start and speak English.<br>Each sentence will appear here in Hebrew.</div>';
-    }
+    const dir = LANGS[myLang].dir;
+    let html = '<div dir="' + dir + '" lang="' + myLang + '">' + emptyText(myLang) + '</div>';
+    if (myLang !== 'en') html += '<div lang="en" style="margin-top:12px;font-size:15px">' + emptyText('en') + '</div>';
+    emptyEl.innerHTML = html;
   }
 
   // ================= translation =================
@@ -259,8 +326,9 @@
 
   // ================= speech output =================
   let ttsBusy = false, ttsTimer = null;
-  function speak(text, lang) {
-    if (!speakOn || !text || !('speechSynthesis' in window)) return;
+  function speak(text, lang, force) {
+    if ((!speakOn && !force) || !text || !('speechSynthesis' in window)) return;
+    if (force) speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = LANGS[lang].sr;
     const voice = speechSynthesis.getVoices().find(v => LANGS[lang].tts.some(p => v.lang.toLowerCase().startsWith(p)));
@@ -283,17 +351,20 @@
     const lines = feed.querySelectorAll('.line');
     if (lines.length >= MAX_LINES) lines[0].remove();
     div.className = 'line';
+    // Tap a line to hear it again, even when read-aloud is off.
+    div.onclick = () => { if (div._say && div._say[0]) speak(div._say[0], div._say[1], true); };
     renderLine(div, m);
     return div;
   }
 
-  function setText(el, text, lang) { el.textContent = text || ''; el.dir = lang ? LANGS[lang].dir : 'auto'; }
+  function setText(el, text, lang) { el.textContent = text || ''; el.dir = lang ? LANGS[lang].dir : 'auto'; el.lang = lang || ''; }
 
   function renderLine(div, m) {
     const main = div.querySelector('.main'), sub = div.querySelector('.sub');
     const chat = !!sync.room;
     div.className = 'line ' + (m.mine ? 'mine' : 'theirs') + (m.mine && chat ? ' chat' : '');
     div.classList.toggle('pending', !m.shown);
+    div._say = m.mine ? [m.translation, m.tlang] : [m.shown, m.shownLang];
     if (m.mine && chat) {
       // Two-phone mode: my own sentence small, with what the other phone received below it.
       setText(main, m.text, m.lang);
@@ -307,7 +378,7 @@
 
   // A sentence spoken into this phone.
   async function handleMySentence(text) {
-    const m = { id: uid(), mine: true, lang: myLang, tlang: other(myLang), text, translation: null };
+    const m = { id: uid(), mine: true, lang: myLang, tlang: targetLang(), text, translation: null };
     const div = addLine(m);
     try {
       m.translation = await translate(text, m.lang, m.tlang);
@@ -315,7 +386,7 @@
       showError('');
     } catch {
       m.failed = true;
-      showError('Translation problem, check the internet connection / בעיה בתרגום, בדקו חיבור לאינטרנט');
+      showError('Translation problem, check the internet connection / בעיה בתרגום, בדקו חיבור לאינטרנט / แปลไม่ได้ ตรวจสอบอินเทอร์เน็ต');
     }
     renderLine(div, m);
     if (sync.room) publish({ type: 'msg', id: m.id, lang: m.lang, text: m.text, tlang: m.tlang, translation: m.translation });
@@ -382,7 +453,7 @@
     r.continuous = true;
     r.interimResults = true;
     r.maxAlternatives = 1;
-    r.onstart = () => setStatus(true, myLang === 'he' ? 'מקשיב לעברית…' : 'Listening to English…');
+    r.onstart = () => setStatus(true, T[myLang].listening(myLang));
     r.onresult = ev => {
       if (ttsBusy) return;
       let talking = false;
@@ -396,10 +467,12 @@
     };
     r.onerror = ev => {
       if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
-        showError('Microphone blocked, allow it in the browser / אין הרשאה למיקרופון, אשרו גישה בדפדפן');
+        showError('Microphone blocked, allow it in the browser / אין הרשאה למיקרופון, אשרו גישה בדפדפן / ไมโครโฟนถูกบล็อก กรุณาอนุญาตในเบราว์เซอร์');
         stop();
       } else if (ev.error !== 'no-speech' && ev.error !== 'aborted') {
-        showError('Speech error: ' + ev.error);
+        showError(ev.error === 'language-not-supported'
+          ? 'This phone cannot recognise ' + NAME.en[myLang] + ' speech. Try Chrome on Android. / הטלפון הזה לא מזהה דיבור ב' + NAME.he[myLang]
+          : 'Speech error: ' + ev.error);
       }
     };
     // Browsers stop listening after silence, so restart automatically.
@@ -408,7 +481,7 @@
       if (listening && recognition === r) {
         try { r.start(); } catch { setTimeout(() => { if (listening && recognition === r) try { r.start(); } catch {} }, 300); }
       } else if (!listening) {
-        setStatus(false, 'Stopped');
+        setStatus(false, T[myLang].stopped);
       }
     };
     return r;
@@ -449,7 +522,7 @@
     micBtn.textContent = '🎤 Start';
     if (recognition) try { recognition.stop(); } catch {}
     if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
-    setStatus(false, 'Stopped');
+    setStatus(false, T[myLang].stopped);
   }
   micBtn.onclick = () => (listening ? stop() : start());
 
@@ -459,7 +532,7 @@
   // so the brokers only ever see scrambled bytes.
   const BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt'];
   const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  const sync = { room: null, topic: null, key: null, clients: [], peerSeen: 0, pingTimer: null };
+  const sync = { room: null, topic: null, key: null, clients: [], peerSeen: 0, peerLang: null, pingTimer: null };
 
   const loaded = {};
   function loadScript(src) {
@@ -518,6 +591,7 @@
     if (!p || p.from === CLIENT_ID) return;
     const wasOnline = peerOnline();
     sync.peerSeen = Date.now();
+    if (LANGS[p.lang] && p.lang !== sync.peerLang) { sync.peerLang = p.lang; renderLang(); }
     if (p.type === 'ping' && !wasOnline) sendPresence(true);
     if (p.type === 'msg') handleIncoming(p);
     renderSync();
@@ -562,13 +636,14 @@
     sync.clients.forEach(c => { try { c.end(true); } catch {} });
     sync.clients = [];
     clearInterval(sync.pingTimer);
-    sync.room = null; sync.key = null; sync.peerSeen = 0;
-    if (!silent) { store.del('room'); renderEmpty(); }
+    sync.room = null; sync.key = null; sync.peerSeen = 0; sync.peerLang = null;
+    if (!silent) { store.del('room'); renderLang(); }
     renderSync();
   }
 
   function joinLink() {
-    return location.origin + location.pathname + '#join=' + sync.room + '&lang=' + other(myLang);
+    // The other phone speaks the language we translate into, and translates into ours.
+    return location.origin + location.pathname + '#join=' + sync.room + '&lang=' + targetLang() + '&to=' + myLang;
   }
 
   async function renderSync() {
@@ -581,19 +656,19 @@
     const peer = peerOnline();
     badge.hidden = false;
     badge.classList.toggle('ok', peer);
-    badge.textContent = !net ? '🔗 connecting… / מתחבר' : peer ? '🔗 connected / מחובר' : '🔗 waiting for other phone / ממתין';
-    $('peerState').textContent = !net ? 'Connecting… / מתחבר…'
-      : peer ? '✅ The other phone is connected / הטלפון השני מחובר' : '⏳ Waiting for the other phone… / ממתין לטלפון השני…';
+    const t = T[myLang];
+    badge.textContent = '🔗 ' + (!net ? t.connecting : peer ? t.connected : t.waiting);
+    $('peerState').textContent = !net ? t.connecting : peer ? '✅ ' + t.connected : '⏳ ' + t.waiting;
     $('codeShow').textContent = prettyCode(sync.room);
     const qrBox = $('qr');
-    if (qrBox.dataset.room !== sync.room + myLang) {
+    if (qrBox.dataset.room !== sync.room + myLang + targetLang()) {
       try {
         await loadScript('https://cdn.jsdelivr.net/npm/qrcode-generator@2.0.4/dist/qrcode.js');
         const q = qrcode(0, 'M');
         q.addData(joinLink());
         q.make();
         qrBox.innerHTML = q.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
-        qrBox.dataset.room = sync.room + myLang;
+        qrBox.dataset.room = sync.room + myLang + targetLang();
       } catch { qrBox.textContent = ''; }
     }
   }
@@ -617,8 +692,11 @@
   renderLang();
   const hash = new URLSearchParams(location.hash.slice(1));
   if (hash.get('join')) {
-    const l = hash.get('lang');
-    if (l === 'he' || l === 'en') { myLang = l; store.set('myLang', l); renderLang(); }
+    const l = hash.get('lang'), to = hash.get('to');
+    if (LANGS[l]) { myLang = l; store.set('myLang', l); }
+    if (LANGS[to] && to !== myLang) { toLang = to; store.set('toLang', to); }
+    else if (toLang === myLang) { toLang = myLang === 'th' ? 'he' : 'th'; store.set('toLang', toLang); }
+    renderLang();
     history.replaceState(null, '', location.pathname + location.search);
     joinRoom(hash.get('join'));
   } else if (store.get('room', null)) {
