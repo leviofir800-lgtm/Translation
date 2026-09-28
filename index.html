@@ -172,6 +172,9 @@
         <option value="claude-haiku-4-5">Claude Haiku 4.5: fastest, cheapest</option>
       </select>
     </label>
+    <label dir="rtl">על השיחה: מי מדבר ואיפה (עוזר ל-Claude לבחור מילים וטון)
+      <textarea id="aiContext" dir="auto" spellcheck="false" style="min-height:80px"></textarea>
+    </label>
     <label dir="rtl">מילון אישי: שורה לכל מילה, בצורה "מילה = תרגום"
       <textarea id="aiGlossary" dir="auto" spellcheck="false"></textarea>
     </label>
@@ -343,10 +346,12 @@
   // ---- Claude (smart translation) ----
   // The key stays in this phone's storage and is only ever sent to api.anthropic.com.
   const DEFAULT_GLOSSARY = 'יעקב = ยาอากอป\nחממה = คามาม่า\nלקטוף = เก็บ';
+  const DEFAULT_CONTEXT = 'בעל עסק ישראלי ובני המשפחה שלו מדברים עם העובדים התאילנדים שלו בעבודה (חממות וחקלאות).';
   const ai = {
     key: store.get('aiKey', ''),
     model: store.get('aiModel', 'claude-opus-5'),
     glossary: store.get('aiGlossary', DEFAULT_GLOSSARY),
+    context: store.get('aiContext', DEFAULT_CONTEXT),
     failing: false,
   };
   const recent = [];    // recent sentences of the conversation, for context
@@ -356,18 +361,20 @@
     if (recent.length > HISTORY_SIZE) recent.shift();
   }
 
-  const AI_SYSTEM = `You are the live interpreter in an Israeli family's home. The family talks with the caregiver who looks after their grandfather; the languages are Hebrew, English and Thai.
+  const AI_SYSTEM = `You are a live interpreter for a spoken conversation between people who speak Hebrew, English and Thai.
 
-Each sentence comes from a phone's speech recognition, so it may have no punctuation or a misheard word. Work out what the speaker most likely meant from the sentence and the recent conversation.
+Each sentence comes from a phone's speech recognition, so it may have no punctuation or a misheard word. Work out what the speaker most likely meant from the sentence, the recent conversation and what you know about the setting.
 
-Translate the way a native speaker would say it out loud at home: natural, simple, everyday spoken language, never word for word or formal. Keep the speaker's tone and whether it is a request, question or statement. Write names the way they sound in the original language, in the target language's script (for example, Hebrew יעקב in Thai is ยาอากอป, not Jacob). The household glossary always takes priority: use its terms exactly, in whichever direction they apply.
+Translate the way a native speaker would say it out loud in this setting: natural, clear, everyday spoken language, never word for word or formal. Keep the speaker's tone and whether it is an instruction, request, question or statement. Write names the way they sound in the original language, in the target language's script (for example, Hebrew יעקב in Thai is ยาอากอป, not Jacob). The glossary always takes priority: use its terms exactly, in whichever direction they apply.
 
 Reply with the translation only, with no quotes, notes or explanations.`;
 
   async function claudeTranslate(text, from, to) {
     const context = recent.filter(h => h.text !== text).map(h => `[${NAME.en[h.lang]}] ${h.text}`).join('\n');
     const glossary = ai.glossary.trim();
-    const user = (glossary ? `<glossary>\n${glossary}\n</glossary>\n\n` : '')
+    const setting = ai.context.trim();
+    const user = (setting ? `<setting>\n${setting}\n</setting>\n\n` : '')
+      + (glossary ? `<glossary>\n${glossary}\n</glossary>\n\n` : '')
       + (context ? `<recent_conversation>\n${context}\n</recent_conversation>\n\n` : '')
       + `Translate this ${NAME.en[from]} sentence into ${NAME.en[to]}:\n<sentence>${text}</sentence>`;
     const body = { model: ai.model, max_tokens: 2000, system: AI_SYSTEM, messages: [{ role: 'user', content: user }] };
@@ -440,6 +447,7 @@ Reply with the translation only, with no quotes, notes or explanations.`;
     $('aiKey').value = ai.key;
     $('aiModel').value = ai.model;
     $('aiGlossary').value = ai.glossary;
+    $('aiContext').value = ai.context;
     $('aiTestOut').hidden = true;
     $('aiDialog').hidden = false;
   }
@@ -447,8 +455,9 @@ Reply with the translation only, with no quotes, notes or explanations.`;
     ai.key = $('aiKey').value.trim();
     ai.model = $('aiModel').value;
     ai.glossary = $('aiGlossary').value;
+    ai.context = $('aiContext').value;
     ai.failing = false;
-    store.set('aiKey', ai.key); store.set('aiModel', ai.model); store.set('aiGlossary', ai.glossary);
+    store.set('aiKey', ai.key); store.set('aiModel', ai.model); store.set('aiGlossary', ai.glossary); store.set('aiContext', ai.context);
     cache.clear();
     showError('');
     renderAiBtn();
