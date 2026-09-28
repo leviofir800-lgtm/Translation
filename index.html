@@ -161,8 +161,12 @@
 <div class="overlay" id="aiDialog" hidden>
   <div class="dialog">
     <h2>✨ Smart translation (Claude)<br><span style="font-size:16px;font-weight:500">תרגום חכם</span></h2>
-    <p dir="rtl">עם מפתח Claude, התרגום מבין את ההקשר של השיחה ומשתמש במילון שלכם. בלי מפתח, או אם יש תקלה, האפליקציה מתרגמת עם Google כמו קודם.</p>
-    <label dir="rtl">מפתח API (נשמר רק בטלפון הזה)
+    <p dir="rtl">התרגום החכם מבין את ההקשר של השיחה ומשתמש במילון שלכם. הוא פועל אוטומטית למי שנכנס לאפליקציה דרך קישור עם קוד גישה. בלי קוד, או אם יש תקלה, האפליקציה מתרגמת עם Google.</p>
+    <p id="aiState" style="text-align:center"></p>
+    <label dir="rtl">קוד גישה (מגיע בקישור)
+      <input class="field" id="aiCode" type="password" dir="ltr" autocomplete="off" spellcheck="false">
+    </label>
+    <label dir="rtl">מפתח API אישי (לא חובה, במקום קוד גישה)
       <input class="field" id="aiKey" type="password" dir="ltr" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
     </label>
     <label dir="rtl">מודל
@@ -181,7 +185,8 @@
     <button class="big primary" id="aiSave">Save / שמור</button>
     <button class="big" id="aiTest">Test / בדיקה</button>
     <div class="test-out" id="aiTestOut" hidden></div>
-    <button class="big danger" id="aiRemove">Remove key / מחק מפתח</button>
+    <button class="big" id="aiShare">📤 Share app link / שלח קישור לאפליקציה</button>
+    <button class="big danger" id="aiRemove">Remove code &amp; key / מחק קוד ומפתח</button>
     <button id="aiClose">Close / סגור</button>
   </div>
 </div>
@@ -349,11 +354,16 @@
   const DEFAULT_CONTEXT = 'בעל עסק ישראלי ובני המשפחה שלו מדברים עם העובדים התאילנדים שלו בעבודה (חממות וחקלאות).';
   const ai = {
     key: store.get('aiKey', ''),
+    code: store.get('aiCode', ''),
     model: store.get('aiModel', 'claude-opus-5'),
     glossary: store.get('aiGlossary', DEFAULT_GLOSSARY),
     context: store.get('aiContext', DEFAULT_CONTEXT),
     failing: false,
   };
+  // Address of the worker that holds the shared Claude key (see worker.js). Not a secret.
+  const AI_PROXY = '';
+  // Smart translation works with the shared worker + access code, or with a personal key.
+  const aiReady = () => !!ai.key || !!(AI_PROXY && ai.code);
   const recent = [];    // recent sentences of the conversation, for context
   const HISTORY_SIZE = 8;
   function remember(lang, text) {
@@ -378,22 +388,28 @@ Reply with the translation only, with no quotes, notes or explanations.`;
       + (context ? `<recent_conversation>\n${context}\n</recent_conversation>\n\n` : '')
       + `Translate this ${NAME.en[from]} sentence into ${NAME.en[to]}:\n<sentence>${text}</sentence>`;
     const body = { model: ai.model, max_tokens: 2000, system: AI_SYSTEM, messages: [{ role: 'user', content: user }] };
-    const headers = {
+    // A personal key talks to Claude directly; otherwise go through the shared worker.
+    const direct = !!ai.key;
+    const url = direct ? 'https://api.anthropic.com/v1/messages' : AI_PROXY;
+    const headers = direct ? {
       'content-type': 'application/json',
       'x-api-key': ai.key,
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
-    };
+    } : { 'content-type': 'application/json', 'x-app-code': ai.code };
     // Low effort keeps the wait after each sentence short (Haiku 4.5 has no effort setting).
     if (ai.model !== 'claude-haiku-4-5') body.output_config = { effort: 'low' };
     // If Opus declines a request, let the API retry it on the recommended fallback model.
-    if (ai.model === 'claude-opus-5') { body.fallbacks = 'default'; headers['anthropic-beta'] = 'server-side-fallback-2026-07-01'; }
+    if (ai.model === 'claude-opus-5') {
+      body.fallbacks = 'default';
+      if (direct) headers['anthropic-beta'] = 'server-side-fallback-2026-07-01';
+    }
 
-    let res = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify(body) });
+    let res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
     if (res.status === 400 && body.fallbacks) {
       // Retry once without the fallback option in case this account can't use it.
       delete body.fallbacks; delete headers['anthropic-beta'];
-      res = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify(body) });
+      res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
     }
     if (!res.ok) {
       let msg = 'HTTP ' + res.status;
@@ -414,14 +430,16 @@ Reply with the translation only, with no quotes, notes or explanations.`;
     const key = from + to + text;
     if (cache.has(key)) return cache.get(key);
     let out = null, lastErr;
-    if (ai.key) {
+    if (aiReady()) {
       try {
         out = { text: await claudeTranslate(text, from, to), engine: 'claude' };
         ai.failing = false;
       } catch (e) {
         lastErr = e;
         ai.failing = true;
-        if (e.status === 401 || e.status === 403) showError('Claude key not accepted, using Google / מפתח Claude לא תקין, מתרגם עם Google');
+        if (e.status === 401 || e.status === 403) showError(ai.key
+          ? 'Claude key not accepted, using Google / מפתח Claude לא תקין, מתרגם עם Google'
+          : 'Access code not accepted, using Google / קוד הגישה לא תקין, מתרגם עם Google');
         else if (e.status === 402 || /credit|billing/i.test(e.message)) showError('No Claude credit, using Google / אין יתרה בחשבון Claude, מתרגם עם Google');
       }
       renderAiBtn();
@@ -440,11 +458,16 @@ Reply with the translation only, with no quotes, notes or explanations.`;
   // ---- smart-translation settings screen ----
   function renderAiBtn() {
     const b = $('aiBtn');
-    b.textContent = !ai.key ? '⚙️' : ai.failing ? '⚠️' : '✨';
-    b.classList.toggle('on', !!ai.key && !ai.failing);
+    b.textContent = !aiReady() ? '⚙️' : ai.failing ? '⚠️' : '✨';
+    b.classList.toggle('on', aiReady() && !ai.failing);
+    $('aiState').textContent = !aiReady() ? '⚪ Google (basic) / תרגום רגיל'
+      : ai.failing ? '⚠️ Claude not responding, using Google / Claude לא עונה, מתרגם עם Google'
+      : '✨ Smart translation on / תרגום חכם פעיל';
+    $('aiShare').hidden = !ai.code;
   }
   function openAi() {
     $('aiKey').value = ai.key;
+    $('aiCode').value = ai.code;
     $('aiModel').value = ai.model;
     $('aiGlossary').value = ai.glossary;
     $('aiContext').value = ai.context;
@@ -453,11 +476,12 @@ Reply with the translation only, with no quotes, notes or explanations.`;
   }
   function saveAi() {
     ai.key = $('aiKey').value.trim();
+    ai.code = $('aiCode').value.trim();
     ai.model = $('aiModel').value;
     ai.glossary = $('aiGlossary').value;
     ai.context = $('aiContext').value;
     ai.failing = false;
-    store.set('aiKey', ai.key); store.set('aiModel', ai.model); store.set('aiGlossary', ai.glossary); store.set('aiContext', ai.context);
+    store.set('aiKey', ai.key); store.set('aiCode', ai.code); store.set('aiModel', ai.model); store.set('aiGlossary', ai.glossary); store.set('aiContext', ai.context);
     cache.clear();
     showError('');
     renderAiBtn();
@@ -466,12 +490,22 @@ Reply with the translation only, with no quotes, notes or explanations.`;
   $('aiClose').onclick = () => { $('aiDialog').hidden = true; };
   $('aiDialog').onclick = e => { if (e.target === $('aiDialog')) $('aiDialog').hidden = true; };
   $('aiSave').onclick = () => { saveAi(); $('aiDialog').hidden = true; };
-  $('aiRemove').onclick = () => { $('aiKey').value = ''; saveAi(); store.del('aiKey'); $('aiDialog').hidden = true; };
+  $('aiRemove').onclick = () => {
+    $('aiKey').value = ''; $('aiCode').value = ''; saveAi(); store.del('aiKey'); store.del('aiCode'); $('aiDialog').hidden = true;
+  };
+  const appLink = () => location.origin + location.pathname + (ai.code ? '#code=' + encodeURIComponent(ai.code) : '');
+  $('aiShare').onclick = async () => {
+    const url = appLink();
+    try {
+      if (navigator.share) await navigator.share({ title: 'Live Translator', url });
+      else { await navigator.clipboard.writeText(url); alert('Link copied / הקישור הועתק'); }
+    } catch {}
+  };
   $('aiTest').onclick = async () => {
     saveAi();
     const out = $('aiTestOut');
     out.hidden = false;
-    if (!ai.key) { out.textContent = 'Enter a key first / הדביקו קודם מפתח'; return; }
+    if (!aiReady()) { out.textContent = AI_PROXY ? 'Enter the access code first / הזינו קודם קוד גישה' : 'Enter a key first / הדביקו קודם מפתח'; return; }
     out.textContent = '…';
     const sample = 'תלך לחממה של יעקב ותקטוף את העגבניות';
     const t0 = performance.now();
@@ -563,7 +597,7 @@ Reply with the translation only, with no quotes, notes or explanations.`;
     const m = { id: p.id, mine: false, lang: p.lang, text: p.text };
     const ready = p.translation && p.tlang === myLang;
     // With a Claude key on this phone, re-translate sentences the other phone translated with Google.
-    const upgrade = ready && ai.key && p.engine !== 'claude';
+    const upgrade = ready && aiReady() && p.engine !== 'claude';
     if (p.lang === myLang) { m.shown = p.text; m.shownLang = myLang; }
     else if (ready && !upgrade) { m.shown = p.translation; m.shownLang = myLang; }
     const div = addLine(m);
@@ -811,7 +845,8 @@ Reply with the translation only, with no quotes, notes or explanations.`;
 
   function joinLink() {
     // The other phone speaks the language we translate into, and translates into ours.
-    return location.origin + location.pathname + '#join=' + sync.room + '&lang=' + targetLang() + '&to=' + myLang;
+    return location.origin + location.pathname + '#join=' + sync.room + '&lang=' + targetLang() + '&to=' + myLang
+      + (ai.code ? '&code=' + encodeURIComponent(ai.code) : '');
   }
 
   async function renderSync() {
@@ -859,6 +894,11 @@ Reply with the translation only, with no quotes, notes or explanations.`;
   // ================= startup =================
   renderLang();
   const hash = new URLSearchParams(location.hash.slice(1));
+  if (hash.get('code')) {
+    // A link with an access code turns on smart translation on this phone.
+    ai.code = hash.get('code'); store.set('aiCode', ai.code); renderAiBtn();
+    history.replaceState(null, '', location.pathname + location.search);
+  }
   if (hash.get('join')) {
     const l = hash.get('lang'), to = hash.get('to');
     if (LANGS[l]) { myLang = l; store.set('myLang', l); }
