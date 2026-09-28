@@ -81,6 +81,11 @@
   .qr svg { width: 210px; height: 210px; }
   .or { text-align: center; color: var(--muted); font-size: 14px; }
   .danger { background: #4a2323; }
+  .dialog label { font-size: 14px; color: var(--muted); display: flex; flex-direction: column; gap: 6px; }
+  .dialog textarea, .dialog select, .dialog .field { font: inherit; font-size: 16px; color: var(--text); background: var(--bg);
+    border: 0; border-radius: 10px; padding: 12px; width: 100%; }
+  .dialog textarea { min-height: 120px; resize: vertical; }
+  .test-out { font-size: 15px; background: var(--bg); border-radius: 10px; padding: 10px 12px; white-space: pre-wrap; }
 </style>
 </head>
 <body>
@@ -108,6 +113,7 @@
       <button id="bigger" title="Larger text">A+</button>
       <button id="speak" title="Read translations aloud">🔈</button>
       <button id="syncBtn" title="Connect another phone">🔗</button>
+      <button id="aiBtn" title="Smart translation (Claude)">⚙️</button>
       <button id="clear" title="Clear">🗑</button>
     </div>
   </div>
@@ -149,6 +155,31 @@
       </div>
     </div>
     <button id="closeDialog">Close / סגור</button>
+  </div>
+</div>
+
+<div class="overlay" id="aiDialog" hidden>
+  <div class="dialog">
+    <h2>✨ Smart translation (Claude)<br><span style="font-size:16px;font-weight:500">תרגום חכם</span></h2>
+    <p dir="rtl">עם מפתח Claude, התרגום מבין את ההקשר של השיחה ומשתמש במילון שלכם. בלי מפתח, או אם יש תקלה, האפליקציה מתרגמת עם Google כמו קודם.</p>
+    <label dir="rtl">מפתח API (נשמר רק בטלפון הזה)
+      <input class="field" id="aiKey" type="password" dir="ltr" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+    </label>
+    <label dir="rtl">מודל
+      <select id="aiModel" dir="ltr">
+        <option value="claude-opus-5">Claude Opus 5: best quality (recommended)</option>
+        <option value="claude-sonnet-5">Claude Sonnet 5: faster, cheaper</option>
+        <option value="claude-haiku-4-5">Claude Haiku 4.5: fastest, cheapest</option>
+      </select>
+    </label>
+    <label dir="rtl">מילון אישי: שורה לכל מילה, בצורה "מילה = תרגום"
+      <textarea id="aiGlossary" dir="auto" spellcheck="false"></textarea>
+    </label>
+    <button class="big primary" id="aiSave">Save / שמור</button>
+    <button class="big" id="aiTest">Test / בדיקה</button>
+    <div class="test-out" id="aiTestOut" hidden></div>
+    <button class="big danger" id="aiRemove">Remove key / מחק מפתח</button>
+    <button id="aiClose">Close / סגור</button>
   </div>
 </div>
 
@@ -309,20 +340,140 @@
     return out;
   }
 
+  // ---- Claude (smart translation) ----
+  // The key stays in this phone's storage and is only ever sent to api.anthropic.com.
+  const DEFAULT_GLOSSARY = 'יעקב = ยาอากอป\nחממה = คามาม่า\nלקטוף = เก็บ';
+  const ai = {
+    key: store.get('aiKey', ''),
+    model: store.get('aiModel', 'claude-opus-5'),
+    glossary: store.get('aiGlossary', DEFAULT_GLOSSARY),
+    failing: false,
+  };
+  const recent = [];    // recent sentences of the conversation, for context
+  const HISTORY_SIZE = 8;
+  function remember(lang, text) {
+    recent.push({ lang, text });
+    if (recent.length > HISTORY_SIZE) recent.shift();
+  }
+
+  const AI_SYSTEM = `You are the live interpreter in an Israeli family's home. The family talks with the caregiver who looks after their grandfather; the languages are Hebrew, English and Thai.
+
+Each sentence comes from a phone's speech recognition, so it may have no punctuation or a misheard word. Work out what the speaker most likely meant from the sentence and the recent conversation.
+
+Translate the way a native speaker would say it out loud at home: natural, simple, everyday spoken language, never word for word or formal. Keep the speaker's tone and whether it is a request, question or statement. Write names the way they sound in the original language, in the target language's script (for example, Hebrew יעקב in Thai is ยาอากอป, not Jacob). The household glossary always takes priority: use its terms exactly, in whichever direction they apply.
+
+Reply with the translation only, with no quotes, notes or explanations.`;
+
+  async function claudeTranslate(text, from, to) {
+    const context = recent.filter(h => h.text !== text).map(h => `[${NAME.en[h.lang]}] ${h.text}`).join('\n');
+    const glossary = ai.glossary.trim();
+    const user = (glossary ? `<glossary>\n${glossary}\n</glossary>\n\n` : '')
+      + (context ? `<recent_conversation>\n${context}\n</recent_conversation>\n\n` : '')
+      + `Translate this ${NAME.en[from]} sentence into ${NAME.en[to]}:\n<sentence>${text}</sentence>`;
+    const body = { model: ai.model, max_tokens: 2000, system: AI_SYSTEM, messages: [{ role: 'user', content: user }] };
+    const headers = {
+      'content-type': 'application/json',
+      'x-api-key': ai.key,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    };
+    // Low effort keeps the wait after each sentence short (Haiku 4.5 has no effort setting).
+    if (ai.model !== 'claude-haiku-4-5') body.output_config = { effort: 'low' };
+    // If Opus declines a request, let the API retry it on the recommended fallback model.
+    if (ai.model === 'claude-opus-5') { body.fallbacks = 'default'; headers['anthropic-beta'] = 'server-side-fallback-2026-07-01'; }
+
+    let res = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify(body) });
+    if (res.status === 400 && body.fallbacks) {
+      // Retry once without the fallback option in case this account can't use it.
+      delete body.fallbacks; delete headers['anthropic-beta'];
+      res = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify(body) });
+    }
+    if (!res.ok) {
+      let msg = 'HTTP ' + res.status;
+      try { msg = (await res.json()).error.message || msg; } catch {}
+      const err = new Error(msg); err.status = res.status; throw err;
+    }
+    const data = await res.json();
+    if (data.stop_reason === 'refusal') throw new Error('refusal');
+    const out = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+    if (!out) throw new Error('empty answer');
+    return out;
+  }
+
   // Whole sentences only: translating a full sentence lets the engine use the context
   // (gender, word order, idioms) instead of translating word by word.
+  // Returns { text, engine }. Claude first when a key is set, otherwise (or on failure) Google & co.
   async function translate(text, from, to) {
     const key = from + to + text;
     if (cache.has(key)) return cache.get(key);
     let out = null, lastErr;
-    for (const fn of [googleTranslate, onDeviceTranslate, myMemoryTranslate]) {
-      try { out = await fn(text, from, to); break; } catch (e) { lastErr = e; }
+    if (ai.key) {
+      try {
+        out = { text: await claudeTranslate(text, from, to), engine: 'claude' };
+        ai.failing = false;
+      } catch (e) {
+        lastErr = e;
+        ai.failing = true;
+        if (e.status === 401 || e.status === 403) showError('Claude key not accepted, using Google / מפתח Claude לא תקין, מתרגם עם Google');
+        else if (e.status === 402 || /credit|billing/i.test(e.message)) showError('No Claude credit, using Google / אין יתרה בחשבון Claude, מתרגם עם Google');
+      }
+      renderAiBtn();
+    }
+    if (!out) {
+      for (const fn of [googleTranslate, onDeviceTranslate, myMemoryTranslate]) {
+        try { out = { text: await fn(text, from, to), engine: 'basic' }; break; } catch (e) { lastErr = e; }
+      }
     }
     if (!out) throw lastErr;
     cache.set(key, out);
     if (cache.size > 500) cache.delete(cache.keys().next().value);
     return out;
   }
+
+  // ---- smart-translation settings screen ----
+  function renderAiBtn() {
+    const b = $('aiBtn');
+    b.textContent = !ai.key ? '⚙️' : ai.failing ? '⚠️' : '✨';
+    b.classList.toggle('on', !!ai.key && !ai.failing);
+  }
+  function openAi() {
+    $('aiKey').value = ai.key;
+    $('aiModel').value = ai.model;
+    $('aiGlossary').value = ai.glossary;
+    $('aiTestOut').hidden = true;
+    $('aiDialog').hidden = false;
+  }
+  function saveAi() {
+    ai.key = $('aiKey').value.trim();
+    ai.model = $('aiModel').value;
+    ai.glossary = $('aiGlossary').value;
+    ai.failing = false;
+    store.set('aiKey', ai.key); store.set('aiModel', ai.model); store.set('aiGlossary', ai.glossary);
+    cache.clear();
+    showError('');
+    renderAiBtn();
+  }
+  $('aiBtn').onclick = openAi;
+  $('aiClose').onclick = () => { $('aiDialog').hidden = true; };
+  $('aiDialog').onclick = e => { if (e.target === $('aiDialog')) $('aiDialog').hidden = true; };
+  $('aiSave').onclick = () => { saveAi(); $('aiDialog').hidden = true; };
+  $('aiRemove').onclick = () => { $('aiKey').value = ''; saveAi(); store.del('aiKey'); $('aiDialog').hidden = true; };
+  $('aiTest').onclick = async () => {
+    saveAi();
+    const out = $('aiTestOut');
+    out.hidden = false;
+    if (!ai.key) { out.textContent = 'Enter a key first / הדביקו קודם מפתח'; return; }
+    out.textContent = '…';
+    const sample = 'תלך לחממה של יעקב ותקטוף את העגבניות';
+    const t0 = performance.now();
+    try {
+      const th = await claudeTranslate(sample, 'he', 'th');
+      out.textContent = `✅ ${((performance.now() - t0) / 1000).toFixed(1)}s\n${sample}\n→ ${th}`;
+    } catch (e) {
+      out.textContent = '❌ ' + e.message;
+    }
+  };
+  renderAiBtn();
 
   // ================= speech output =================
   let ttsBusy = false, ttsTimer = null;
@@ -381,15 +532,17 @@
     const m = { id: uid(), mine: true, lang: myLang, tlang: targetLang(), text, translation: null };
     const div = addLine(m);
     try {
-      m.translation = await translate(text, m.lang, m.tlang);
+      const r = await translate(text, m.lang, m.tlang);
+      m.translation = r.text; m.engine = r.engine;
       m.shown = m.translation; m.shownLang = m.tlang;
-      showError('');
+      if (!ai.failing) showError('');
     } catch {
       m.failed = true;
       showError('Translation problem, check the internet connection / בעיה בתרגום, בדקו חיבור לאינטרנט / แปลไม่ได้ ตรวจสอบอินเทอร์เน็ต');
     }
+    remember(m.lang, text);
     renderLine(div, m);
-    if (sync.room) publish({ type: 'msg', id: m.id, lang: m.lang, text: m.text, tlang: m.tlang, translation: m.translation });
+    if (sync.room) publish({ type: 'msg', id: m.id, lang: m.lang, text: m.text, tlang: m.tlang, translation: m.translation, engine: m.engine });
     else speak(m.translation, m.tlang);
   }
 
@@ -399,14 +552,20 @@
     if (seen.has(p.id)) return;
     seen.add(p.id);
     const m = { id: p.id, mine: false, lang: p.lang, text: p.text };
-    if (p.translation && p.tlang === myLang) { m.shown = p.translation; m.shownLang = myLang; }
-    else if (p.lang === myLang) { m.shown = p.text; m.shownLang = myLang; }
+    const ready = p.translation && p.tlang === myLang;
+    // With a Claude key on this phone, re-translate sentences the other phone translated with Google.
+    const upgrade = ready && ai.key && p.engine !== 'claude';
+    if (p.lang === myLang) { m.shown = p.text; m.shownLang = myLang; }
+    else if (ready && !upgrade) { m.shown = p.translation; m.shownLang = myLang; }
     const div = addLine(m);
     if (!m.shown) {
-      try { m.shown = await translate(p.text, p.lang, myLang); m.shownLang = myLang; }
-      catch { m.failed = true; }
+      try { m.shown = (await translate(p.text, p.lang, myLang)).text; m.shownLang = myLang; }
+      catch {
+        if (ready) { m.shown = p.translation; m.shownLang = myLang; } else m.failed = true;
+      }
       renderLine(div, m);
     }
+    remember(p.lang, p.text);
     if (m.shown) speak(m.shown, myLang);
   }
 
