@@ -191,6 +191,19 @@
   </div>
 </div>
 
+<div class="overlay" id="testDialog" hidden>
+  <div class="dialog">
+    <h2>🧪 Translation test / בדיקת תרגום</h2>
+    <p dir="rtl">מריץ משפטי עבודה אמיתיים דרך Claude, בשני הכיוונים. בסוף לוחצים "העתק תוצאות" ושולחים ל-Claude Code לבדיקה.</p>
+    <label dir="rtl" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="testGlossary" style="width:auto"> להשתמש במילון האישי</label>
+    <label dir="rtl" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="testPivot" style="width:auto" checked> להשוות גם לתרגום דרך אנגלית</label>
+    <button class="big primary" id="testRun">▶ Run / הרץ</button>
+    <div class="test-out" id="testOut" dir="auto" style="max-height:50vh;overflow-y:auto"></div>
+    <button class="big" id="testCopy">📋 Copy results / העתק תוצאות</button>
+    <button id="testClose">Close / סגור</button>
+  </div>
+</div>
+
 <script>
 (() => {
   // ================= basics =================
@@ -351,13 +364,18 @@
   // ---- Claude (smart translation) ----
   // The key stays in this phone's storage and is only ever sent to api.anthropic.com.
   const DEFAULT_GLOSSARY = 'יעקב = ยาอากอป\nחממה = คามาม่า\nלקטוף = เก็บ';
-  const DEFAULT_CONTEXT = 'בעל עסק ישראלי מדבר עם העובדים התאילנדים שלו בעבודה (חממות וחקלאות).';
+  const DEFAULT_CONTEXT = 'בעל עסק ישראלי (גבר) מדבר עם העובדים התאילנדים שלו בעבודה, בחקלאות ובחממות. רוב העובדים גברים מאיסאן (צפון-מזרח תאילנד).';
+  // Earlier defaults, replaced automatically when the user never changed them.
+  const OLD_CONTEXTS = [
+    'בעל עסק ישראלי ובני המשפחה שלו מדברים עם העובדים התאילנדים שלו בעבודה (חממות וחקלאות).',
+    'בעל עסק ישראלי מדבר עם העובדים התאילנדים שלו בעבודה (חממות וחקלאות).',
+  ];
   const ai = {
     key: store.get('aiKey', ''),
     code: store.get('aiCode', ''),
     model: store.get('aiModel', 'claude-opus-5'),
     glossary: store.get('aiGlossary', DEFAULT_GLOSSARY),
-    context: store.get('aiContext', DEFAULT_CONTEXT),
+    context: (c => OLD_CONTEXTS.includes(c) ? DEFAULT_CONTEXT : c)(store.get('aiContext', DEFAULT_CONTEXT)),
     failing: false,
   };
   // Address of the worker that holds the shared Claude key (see worker.js). Not a secret.
@@ -371,13 +389,48 @@
     if (recent.length > HISTORY_SIZE) recent.shift();
   }
 
-  const AI_SYSTEM = `You are a live interpreter for a spoken conversation between people who speak Hebrew, English and Thai.
+  // Built from research on interpreting for Thai farm workers in Israel and on LLM
+  // interpreting: scenario, speaker and cultural context plus clear rules and examples.
+  const AI_SYSTEM = `You are the interpreter in a live spoken conversation at an Israeli workplace, usually a farm or greenhouses. One side speaks Hebrew (the employer, sometimes his family or managers). The other side is Thai workers, most of them men from Isan (northeast Thailand) with a basic education. English is sometimes used too. The <setting> block, when present, describes the conversation more precisely and takes priority over these defaults.
 
-Each sentence comes from a phone's speech recognition, so it may have no punctuation or a misheard word. Work out what the speaker most likely meant from the sentence, the recent conversation and what you know about the setting.
+Your translation is shown in large text on a phone and may be read aloud, so the listener must understand it instantly.
 
-Translate the way a native speaker would say it out loud in this setting: natural, clear, everyday spoken language, never word for word or formal. Keep the speaker's tone and whether it is an instruction, request, question or statement. Write names the way they sound in the original language, in the target language's script (for example, Hebrew יעקב in Thai is ยาอากอป, not Jacob). The glossary always takes priority: use its terms exactly, in whichever direction they apply.
+HOW THE INPUT ARRIVES
+- Each sentence comes from a phone's speech recognition: no punctuation, Thai without spaces, sometimes a misheard or repeated word. Use the recent conversation and the setting to work out what the speaker most likely said, and translate that.
+- Thai speakers may use Isan words, for example บ่ (not), เฮ็ด (do), แม่น (right, yes), ข่อย (I), เจ้า (you), เบิ่ง (look), หลาย (very, many), เว้า (speak), ไผ (who), หยัง or อีหยัง (what), ไส (where), ซิ (will), เด้อ (friendly sentence ending). Understand them as normal speech.
+- Hebrew speakers use everyday slang (יאללה, סבבה, אחלה, תכף, בלגן, חבל על הזמן). Translate the meaning, not the words.
 
-Reply with the translation only, with no quotes, notes or explanations.`;
+TRANSLATING INTO THAI
+- Use short, simple, everyday spoken Thai that a farm worker from Isan understands at once. Avoid formal, written or bookish words and rare English loanwords.
+- Hebrew commands sound normal in Hebrew but rude in Thai when translated bluntly. Keep the instruction clear and firm, but soften it the way a Thai boss would, usually with นะ, หน่อย or ช่วย... หน่อย. Keep real urgency or safety warnings strong (for example ระวัง!, ห้าม..., อย่า...).
+- The Hebrew speaker is a man by default, so when a polite ending fits, use ครับ or นะครับ, never ค่ะ, unless the setting says otherwise. Do not add a polite ending to every sentence.
+- Leave out "you" when Thai would, or use คุณ or the worker's name. Never use กู, มึง, or the formal ท่าน.
+- Numbers as digits. Times in the everyday Thai clock with digits, such as 6 โมงเช้า, 10 โมง, บ่าย 2 โมง, 5 โมงเย็น, 1 ทุ่ม. Money in เชเกล. Keep units the speaker used.
+
+TRANSLATING INTO HEBREW
+- Use natural, everyday spoken Israeli Hebrew, the way an Israeli would say it, not a literal rendering.
+- Workers are men by default: use masculine forms for them and for the employer they address, unless the context shows otherwise.
+- Drop Thai politeness particles (ครับ, ค่ะ, นะ, เด้อ); do not turn them into "sir" or "please". Render พี่, นาย, บอส or เจ้านาย addressed to the employer as "you" or "בוס" as fits.
+
+FOR EVERY LANGUAGE
+- Keep the speaker's intent: instruction, request, question, complaint, joke or warning. A question stays a question.
+- Write people's names the way they sound in the original language, in the target language's script (Hebrew יעקב in Thai is ยาอากอป, not Jacob).
+- The <glossary> block, when present, always takes priority: use its terms exactly, in whichever direction they apply.
+- If the input is only a filler sound or a greeting, translate it as the natural equivalent.
+
+EXAMPLES (for style only; never copy them into an answer)
+Hebrew: מחר מתחילים בשש בבוקר אל תאחרו
+Thai: พรุ่งนี้เริ่มงาน 6 โมงเช้านะ อย่ามาสายนะครับ
+Hebrew: יאללה תעמיסו את הארגזים על הטרקטור
+Thai: เอาลังขึ้นรถแทรกเตอร์เลยนะ
+Hebrew: כמה ארגזים עשיתם היום
+Thai: วันนี้ทำได้กี่ลังแล้ว
+Thai: บ่มีน้ำในห้องน้ำเด้อนาย
+Hebrew: אין מים במקלחות, בוס.
+Thai: ผมปวดหลังมากครับขอพักพรุ่งนี้ได้ไหมครับ
+Hebrew: כואב לי הגב מאוד. אפשר לקחת מחר יום חופש?
+
+Reply with the translation only, with no quotes, labels, notes or explanations.`;
 
   async function claudeTranslate(text, from, to) {
     const context = recent.filter(h => h.text !== text).map(h => `[${NAME.en[h.lang]}] ${h.text}`).join('\n');
@@ -387,7 +440,12 @@ Reply with the translation only, with no quotes, notes or explanations.`;
       + (glossary ? `<glossary>\n${glossary}\n</glossary>\n\n` : '')
       + (context ? `<recent_conversation>\n${context}\n</recent_conversation>\n\n` : '')
       + `Translate this ${NAME.en[from]} sentence into ${NAME.en[to]}:\n<sentence>${text}</sentence>`;
-    const body = { model: ai.model, max_tokens: 2000, system: AI_SYSTEM, messages: [{ role: 'user', content: user }] };
+    // The instructions never change, so let the API cache them between sentences.
+    const body = {
+      model: ai.model, max_tokens: 2000,
+      system: [{ type: 'text', text: AI_SYSTEM, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: user }],
+    };
     // A personal key talks to Claude directly; otherwise go through the shared worker.
     const direct = !!ai.key;
     const url = direct ? 'https://api.anthropic.com/v1/messages' : AI_PROXY;
@@ -891,12 +949,69 @@ Reply with the translation only, with no quotes, notes or explanations.`;
     } catch {}
   };
 
+  // ================= test mode (#test) =================
+  // Runs the sentences in tests.js through Claude and shows each translation and its time.
+  let testReport = '';
+  async function runTests() {
+    const out = $('testOut');
+    if (!aiReady()) { out.textContent = 'Smart translation is off: open the link with the access code first. / התרגום החכם כבוי'; return; }
+    try { await loadScript('tests.js?v=' + Date.now()); } catch { out.textContent = 'Could not load tests.js'; return; }
+    $('testRun').disabled = true;
+    const saved = { glossary: ai.glossary, recent: recent.splice(0) };
+    if (!$('testGlossary').checked) ai.glossary = '';
+    const head = `model: ${ai.model} | glossary: ${ai.glossary ? 'on' : 'off'} | ${new Date().toISOString().slice(0, 16)}`;
+    testReport = head + '\n';
+    out.textContent = head + '\n';
+    const times = [];
+    for (const g of window.TEST_GROUPS) {
+      recent.length = 0;
+      testReport += `\n## ${g.name}\n`;
+      out.textContent += `\n## ${g.name}\n`;
+      for (const t of g.turns) {
+        const t0 = performance.now();
+        let res;
+        try { res = await claudeTranslate(t.text, t.lang, t.to); } catch (e) { res = '❌ ' + e.message; }
+        const sec = (performance.now() - t0) / 1000;
+        times.push(sec);
+        let line = `[${t.lang}→${t.to} ${sec.toFixed(1)}s] ${t.text}\n  → ${res}\n`;
+        // Same sentence translated in two steps through English, for comparison.
+        if ($('testPivot').checked && t.lang !== 'en' && t.to !== 'en') {
+          try {
+            const en = await claudeTranslate(t.text, t.lang, 'en');
+            const via = await claudeTranslate(en, 'en', t.to);
+            line += `  ⇢ via English: ${en} → ${via}\n`;
+          } catch (e) { line += `  ⇢ via English: ❌ ${e.message}\n`; }
+        }
+        remember(t.lang, t.text);
+        testReport += line;
+        out.textContent += line;
+        out.scrollTop = out.scrollHeight;
+      }
+    }
+    times.sort((a, b) => a - b);
+    const summary = `\nmedian ${times[Math.floor(times.length / 2)].toFixed(1)}s, slowest ${times[times.length - 1].toFixed(1)}s, ${times.length} sentences\n`;
+    testReport += summary;
+    out.textContent += summary;
+    ai.glossary = saved.glossary;
+    recent.length = 0; recent.push(...saved.recent);
+    $('testRun').disabled = false;
+  }
+  $('testRun').onclick = runTests;
+  $('testClose').onclick = () => { $('testDialog').hidden = true; };
+  $('testCopy').onclick = async () => {
+    try { await navigator.clipboard.writeText(testReport || $('testOut').textContent); alert('Copied / הועתק'); } catch {}
+  };
+
   // ================= startup =================
   renderLang();
   const hash = new URLSearchParams(location.hash.slice(1));
   if (hash.get('code')) {
     // A link with an access code turns on smart translation on this phone.
     ai.code = hash.get('code'); store.set('aiCode', ai.code); renderAiBtn();
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  if (hash.has('test')) {
+    $('testDialog').hidden = false;
     history.replaceState(null, '', location.pathname + location.search);
   }
   if (hash.get('join')) {
