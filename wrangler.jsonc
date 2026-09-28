@@ -1,0 +1,7 @@
+// Cloudflare Workers config: deploys worker.js as the "translator" worker.
+// The API key and access code are set as secrets in the Cloudflare dashboard, never here.
+{
+  "name": "translator",
+  "main": "worker.js",
+  "compatibility_date": "2026-09-01"
+}
