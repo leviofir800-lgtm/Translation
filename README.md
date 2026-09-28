@@ -41,7 +41,7 @@
 3. בעמוד של ה-Worker: **Settings → Variables and Secrets → Add**, פעמיים, מסוג **Secret**:
    - `ANTHROPIC_API_KEY` = המפתח של Claude
    - `APP_CODE` = קוד גישה שבוחרים (סיסמה ארוכה)
-4. את כתובת השרת (`https://translator.<השם-שלך>.workers.dev`) מכניסים ל-`AI_PROXY` ב-`index.html`.
+4. את כתובת השרת מכניסים ל-`AI_PROXY` ב-`index.html` (כרגע: `https://translator.leviofir800.workers.dev/`).
 
 **שימוש:** שולחים לאנשים את הקישור `https://leviofir800-lgtm.github.io/Translation/#code=<קוד הגישה>`. אחרי פתיחה אחת הקוד נשמר בטלפון, והכפתור ⚙️ הופך ל-✨. הקישור של "חיבור שני טלפונים" כולל את הקוד אוטומטית, ובהגדרות יש כפתור **"שלח קישור לאפליקציה"**.
 

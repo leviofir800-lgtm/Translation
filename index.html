@@ -361,7 +361,7 @@
     failing: false,
   };
   // Address of the worker that holds the shared Claude key (see worker.js). Not a secret.
-  const AI_PROXY = '';
+  const AI_PROXY = 'https://translator.leviofir800.workers.dev/';
   // Smart translation works with the shared worker + access code, or with a personal key.
   const aiReady = () => !!ai.key || !!(AI_PROXY && ai.code);
   const recent = [];    // recent sentences of the conversation, for context
