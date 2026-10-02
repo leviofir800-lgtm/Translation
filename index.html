@@ -178,7 +178,7 @@
       </div>
     </div>
     <label dir="auto">My name / השם שלי / ชื่อของฉัน (shown with ✓✓)
-      <input class="field" id="myName" maxlength="30" autocomplete="off" spellcheck="false">
+      <input class="field" id="myName" dir="auto" maxlength="30" autocomplete="off" spellcheck="false">
     </label>
     <button id="closeDialog">Close / סגור</button>
   </div>
@@ -1188,10 +1188,19 @@ Reply with the translation only, with no quotes, labels, notes or explanations.`
         del.onclick = () => updateTask(task.id, x => { x.deleted = true; });
         el.appendChild(del);
       } else {
-        meta.textContent = (task.ownerName ? t.from + ' ' + task.ownerName + ' · ' : '') + task.text;
-        meta.dir = LANGS[task.lang].dir;
-        if (done) meta.textContent = '✅ ' + t.done + ' · ' + meta.textContent;
-        else {
+        // Mixed Thai and Hebrew on one line: isolate each part so the order stays readable.
+        const parts = [];
+        if (done) parts.push('✅ ' + t.done);
+        if (task.ownerName) parts.push(t.from + ' ' + task.ownerName);
+        parts.push(task.text);
+        meta.dir = LANGS[myLang].dir;
+        parts.forEach((x, i) => {
+          if (i) meta.append(' · ');
+          const b = document.createElement('bdi');
+          b.textContent = x;
+          meta.append(b);
+        });
+        if (!done) {
           const btn = document.createElement('button');
           btn.className = 't-done';
           btn.textContent = t.markDone;
