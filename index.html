@@ -85,6 +85,26 @@
   .dialog textarea, .dialog select, .dialog .field { font: inherit; font-size: 16px; color: var(--text); background: var(--bg);
     border: 0; border-radius: 10px; padding: 12px; width: 100%; }
   .dialog textarea { min-height: 120px; resize: vertical; }
+  .dialog input.field { text-transform: none; letter-spacing: normal; text-align: start; font-size: 16px; }
+  .ticks { font-size: 13px; color: var(--muted); text-align: end; margin-top: 4px; }
+  .ticks.read { color: #53bdeb; }
+
+  /* tasks pinned at the top */
+  #tasks { background: var(--bg); padding: 10px 16px 0; display: flex; flex-direction: column; gap: 8px;
+    max-height: 42vh; overflow-y: auto; flex: none; }
+  .tasks-head { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: var(--muted); }
+  .tasks-head button { font-size: 13px; padding: 4px 10px; }
+  .task { background: #2a2410; border: 1px solid #6b5a1e; border-radius: 14px; padding: 10px 14px;
+    display: flex; gap: 10px; align-items: center; }
+  .task .t-body { flex: 1; min-width: 0; }
+  .task .t-main { font-size: calc(var(--font-size) * .62); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+  .task .t-meta { font-size: 13px; color: var(--muted); margin-top: 4px; overflow-wrap: anywhere; }
+  .task .t-meta.read { color: #53bdeb; }
+  .task .t-meta.done { color: #3ddc84; }
+  .task.done { opacity: .55; }
+  .task.done .t-main { text-decoration: line-through; }
+  .task button { flex: none; }
+  .task .t-done { background: var(--accent); font-weight: 700; padding: 10px 14px; }
   .test-out { font-size: 15px; background: var(--bg); border-radius: 10px; padding: 10px 12px; white-space: pre-wrap; }
 </style>
 </head>
@@ -112,12 +132,15 @@
       <button id="smaller" title="Smaller text">A−</button>
       <button id="bigger" title="Larger text">A+</button>
       <button id="speak" title="Read translations aloud">🔈</button>
+      <button id="taskBtn" title="New task" hidden>📌</button>
       <button id="syncBtn" title="Connect another phone">🔗</button>
       <button id="aiBtn" title="Smart translation (Claude)">⚙️</button>
       <button id="clear" title="Clear">🗑</button>
     </div>
   </div>
 </header>
+
+<section id="tasks" hidden></section>
 
 <main id="feed">
   <div class="empty" id="empty"></div>
@@ -154,6 +177,9 @@
         <button class="big danger" id="leaveRoom">Disconnect / נתק</button>
       </div>
     </div>
+    <label dir="auto">My name / השם שלי / ชื่อของฉัน (shown with ✓✓)
+      <input class="field" id="myName" maxlength="30" autocomplete="off" spellcheck="false">
+    </label>
     <button id="closeDialog">Close / סגור</button>
   </div>
 </div>
@@ -188,6 +214,16 @@
     <button class="big" id="aiShare">📤 Share app link / שלח קישור לאפליקציה</button>
     <button class="big danger" id="aiRemove">Remove code &amp; key / מחק קוד ומפתח</button>
     <button id="aiClose">Close / סגור</button>
+  </div>
+</div>
+
+<div class="overlay" id="taskDialog" hidden>
+  <div class="dialog">
+    <h2>📌 New task / משימה חדשה / งานใหม่</h2>
+    <p dir="rtl">כתבו את המשימה, או הכתיבו אותה עם המיקרופון של המקלדת. היא תתורגם ותופיע למעלה במסך של הטלפון השני, ותראו כשהיא נקראה (✓✓ כחול) וכשהיא בוצעה (✅).</p>
+    <textarea id="taskText" dir="auto" style="min-height:90px"></textarea>
+    <button class="big primary" id="taskSend">Send / שלח / ส่ง</button>
+    <button id="taskClose">Close / סגור</button>
   </div>
 </div>
 
@@ -229,6 +265,8 @@
       synced: l => `מה שנאמר בטלפון השני יופיע כאן ב${NAME.he[l]}.`,
       listening: l => `מקשיב ל${NAME.he[l]}…`,
       stopped: 'עצור', connecting: 'מתחבר…', connected: 'מחובר', waiting: 'ממתין לטלפון השני…',
+      tasks: 'משימות', markDone: 'בוצע ✓', done: 'בוצע', sent: 'נשלח', delivered: 'התקבל', read: 'נקרא',
+      clearDone: 'ניקוי מה שבוצע', from: 'מאת',
     },
     en: {
       start: l => `Press Start and speak ${NAME.en[l]}.`,
@@ -237,6 +275,8 @@
       synced: l => `What the other phone hears will appear here in ${NAME.en[l]}.`,
       listening: l => `Listening to ${NAME.en[l]}…`,
       stopped: 'Stopped', connecting: 'Connecting…', connected: 'Connected', waiting: 'Waiting for the other phone…',
+      tasks: 'Tasks', markDone: 'Done ✓', done: 'Done', sent: 'Sent', delivered: 'Delivered', read: 'Read',
+      clearDone: 'Clear completed', from: 'From',
     },
     th: {
       start: l => `กด Start แล้วพูด${NAME.th[l]}`,
@@ -245,16 +285,20 @@
       synced: l => `สิ่งที่อีกเครื่องได้ยินจะแสดงที่นี่เป็น${NAME.th[l]}`,
       listening: l => `กำลังฟัง${NAME.th[l]}…`,
       stopped: 'หยุดแล้ว', connecting: 'กำลังเชื่อมต่อ…', connected: 'เชื่อมต่อแล้ว', waiting: 'กำลังรออีกเครื่อง…',
+      tasks: 'งาน', markDone: 'ทำเสร็จแล้ว ✓', done: 'เสร็จแล้ว', sent: 'ส่งแล้ว', delivered: 'ได้รับแล้ว', read: 'อ่านแล้ว',
+      clearDone: 'ล้างงานที่เสร็จแล้ว', from: 'จาก',
     },
   };
   const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
-  const CLIENT_ID = uid();
 
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
     del(k) { try { localStorage.removeItem(k); } catch {} },
   };
+  // Stays the same across reloads, so read receipts and tasks know which phone is which.
+  const CLIENT_ID = store.get('clientId', null) || (id => (store.set('clientId', id), id))(uid());
+  let myName = store.get('myName', '');
 
   const feed = $('feed'), emptyEl = $('empty'), micBtn = $('mic'), errorEl = $('error');
   const MAX_LINES = 80;
@@ -598,7 +642,7 @@ Reply with the translation only, with no quotes, labels, notes or explanations.`
   function addLine(m) {
     emptyEl.hidden = true;
     const div = document.createElement('div');
-    div.innerHTML = '<div class="main"></div><div class="sub"></div>';
+    div.innerHTML = '<div class="main"></div><div class="sub"></div><div class="ticks" hidden></div>';
     feed.appendChild(div);
     const lines = feed.querySelectorAll('.line');
     if (lines.length >= MAX_LINES) lines[0].remove();
@@ -621,12 +665,30 @@ Reply with the translation only, with no quotes, labels, notes or explanations.`
       // Two-phone mode: my own sentence small, with what the other phone received below it.
       setText(main, m.text, m.lang);
       setText(sub, m.translation ? m.translation : (m.failed ? '⚠️' : '…'), m.tlang);
+      renderTicks(div.querySelector('.ticks'), m);
     } else {
       setText(main, m.shown || (m.failed ? '⚠️ ' + m.text : '…'), m.shown ? m.shownLang : m.lang);
       setText(sub, m.text, m.lang);
     }
     feed.scrollTop = feed.scrollHeight;
   }
+
+  // WhatsApp-style receipts on my own lines: 🕓 sending, ✓ sent, ✓✓ delivered, blue ✓✓ read.
+  function receiptText(status, people) {
+    const t = T[myLang];
+    const names = Object.values(people || {}).filter(Boolean).join(', ');
+    if (status === 'read') return '✓✓ ' + t.read + (names ? ' · ' + names : '');
+    if (status === 'delivered') return '✓✓ ' + t.delivered;
+    if (status === 'sent') return '✓ ' + t.sent;
+    return '🕓';
+  }
+  function renderTicks(el, m) {
+    if (!el) return;
+    el.hidden = false;
+    el.textContent = receiptText(m.status, m.readers);
+    el.classList.toggle('read', m.status === 'read');
+  }
+  const sentLines = new Map();   // my sentences in two-phone mode, by id, for receipts
 
   // A sentence spoken into this phone.
   async function handleMySentence(text) {
@@ -642,9 +704,17 @@ Reply with the translation only, with no quotes, labels, notes or explanations.`
       showError('Translation problem, check the internet connection / בעיה בתרגום, בדקו חיבור לאינטרנט / แปลไม่ได้ ตรวจสอบอินเทอร์เน็ต');
     }
     remember(m.lang, text);
-    renderLine(div, m);
-    if (sync.room) publish({ type: 'msg', id: m.id, lang: m.lang, text: m.text, tlang: m.tlang, translation: m.translation, engine: m.engine });
-    else speak(m.translation, m.tlang);
+    if (sync.room) {
+      m.readers = {};
+      sentLines.set(m.id, { div, m });
+      renderLine(div, m);
+      await publish({ type: 'msg', id: m.id, lang: m.lang, text: m.text, tlang: m.tlang, translation: m.translation, engine: m.engine });
+      if (!m.status) m.status = 'sent';
+      renderLine(div, m);
+    } else {
+      renderLine(div, m);
+      speak(m.translation, m.tlang);
+    }
   }
 
   // A sentence that arrived from the other phone.
@@ -659,6 +729,7 @@ Reply with the translation only, with no quotes, labels, notes or explanations.`
     if (p.lang === myLang) { m.shown = p.text; m.shownLang = myLang; }
     else if (ready && !upgrade) { m.shown = p.translation; m.shownLang = myLang; }
     const div = addLine(m);
+    sendReceipt(p.id, 'delivered');
     if (!m.shown) {
       try { m.shown = (await translate(p.text, p.lang, myLang)).text; m.shownLang = myLang; }
       catch {
@@ -667,7 +738,32 @@ Reply with the translation only, with no quotes, labels, notes or explanations.`
       renderLine(div, m);
     }
     remember(p.lang, p.text);
+    markRead(p.id);
     if (m.shown) speak(m.shown, myLang);
+  }
+
+  // Tell the sender a sentence arrived, and that it was read once it is on a visible screen.
+  const unread = [];
+  function sendReceipt(ids, state) {
+    publish({ type: 'ack', ids: [].concat(ids), state, name: myName });
+  }
+  function markRead(id) {
+    if (document.visibilityState === 'visible') sendReceipt(id, 'read');
+    else unread.push(id);
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (unread.length) sendReceipt(unread.splice(0), 'read');
+    renderTasks();
+  });
+  function onReceipt(p) {
+    for (const id of p.ids || []) {
+      const e = sentLines.get(id);
+      if (!e) continue;
+      if (p.state === 'read') { e.m.status = 'read'; e.m.readers[p.from] = p.name || ''; }
+      else if (e.m.status !== 'read') e.m.status = 'delivered';
+      renderLine(e.div, e.m);
+    }
   }
 
   // ================= speech recognition =================
@@ -675,7 +771,7 @@ Reply with the translation only, with no quotes, labels, notes or explanations.`
   // once the speaker pauses, so every translation is a full sentence.
   const PAUSE_MS = 1100;       // silence that ends a sentence
   const MAX_WAIT_MS = 4000;    // don't wait forever while someone keeps talking
-  let listening = false, recognition = null;
+  let listening = false, recognition = null, autoResumed = false;
   let pending = '', flushTimer = null, firstPieceAt = 0;
 
   function setStatus(on, text) { $('dot').classList.toggle('on', on); $('statusText').textContent = text; }
@@ -727,6 +823,7 @@ Reply with the translation only, with no quotes, labels, notes or explanations.`
     };
     r.onerror = ev => {
       if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+        if (autoResumed) { autoResumed = false; stop(); return; }   // needs a tap after all; no scary message
         showError('Microphone blocked, allow it in the browser / אין הרשאה למיקרופון, אשרו גישה בדפדפן / ไมโครโฟนถูกบล็อก กรุณาอนุญาตในเบราว์เซอร์');
         stop();
       } else if (ev.error !== 'no-speech' && ev.error !== 'aborted') {
@@ -835,10 +932,10 @@ Reply with the translation only, with no quotes, labels, notes or explanations.`
     return JSON.parse(new TextDecoder().decode(pt));
   }
 
-  async function publish(obj) {
+  async function publish(obj, topic = sync.topic, retain = false) {
     if (!sync.room) return;
     const payload = await encrypt({ ...obj, from: CLIENT_ID });
-    sync.clients.forEach(c => { if (c.connected) c.publish(sync.topic, payload, { qos: 1 }); });
+    sync.clients.forEach(c => { if (c.connected) c.publish(topic, payload, { qos: 1, retain }); });
   }
 
   function sendPresence(reply) {
@@ -848,12 +945,16 @@ Reply with the translation only, with no quotes, labels, notes or explanations.`
   async function onMessage(bytes) {
     let p;
     try { p = await decrypt(new Uint8Array(bytes)); } catch { return; }
-    if (!p || p.from === CLIENT_ID) return;
+    if (!p) return;
+    // The task list is kept on the broker and can be old or our own, so it doesn't count as presence.
+    if (p.type === 'tasks') { onTaskList(p.list); return; }
+    if (p.from === CLIENT_ID) return;
     const wasOnline = peerOnline();
     sync.peerSeen = Date.now();
     if (LANGS[p.lang] && p.lang !== sync.peerLang) { sync.peerLang = p.lang; renderLang(); }
     if (p.type === 'ping' && !wasOnline) sendPresence(true);
     if (p.type === 'msg') handleIncoming(p);
+    if (p.type === 'ack') onReceipt(p);
     renderSync();
   }
 
@@ -875,9 +976,10 @@ Reply with the translation only, with no quotes, labels, notes or explanations.`
     }
     sync.room = code;
     store.set('room', code);
+    loadTasks();
     sync.clients = BROKERS.map(url => {
       const c = mqtt.connect(url, { clientId: 'ct_' + uid(), reconnectPeriod: 3000, connectTimeout: 10000, clean: true });
-      c.on('connect', () => { c.subscribe(sync.topic, { qos: 1 }); sendPresence(); renderSync(); });
+      c.on('connect', () => { c.subscribe([sync.topic, sync.topic + '/tasks'], { qos: 1 }); sendPresence(); renderSync(); });
       c.on('message', (t, msg) => onMessage(msg));
       c.on('close', renderSync);
       c.on('error', () => {});
@@ -897,6 +999,7 @@ Reply with the translation only, with no quotes, labels, notes or explanations.`
     sync.clients = [];
     clearInterval(sync.pingTimer);
     sync.room = null; sync.key = null; sync.peerSeen = 0; sync.peerLang = null;
+    tasks.clear(); renderTasks();
     if (!silent) { store.del('room'); renderLang(); }
     renderSync();
   }
@@ -910,6 +1013,7 @@ Reply with the translation only, with no quotes, labels, notes or explanations.`
   async function renderSync() {
     const badge = $('syncBadge');
     $('syncBtn').classList.toggle('on', !!sync.room);
+    $('taskBtn').hidden = !sync.room;
     $('syncSetup').hidden = !!sync.room;
     $('syncActive').hidden = !sync.room;
     if (!sync.room) { badge.hidden = true; return; }
@@ -934,7 +1038,8 @@ Reply with the translation only, with no quotes, labels, notes or explanations.`
     }
   }
 
-  $('syncBtn').onclick = () => { $('syncDialog').hidden = false; renderSync(); };
+  $('syncBtn').onclick = () => { $('myName').value = myName; $('syncDialog').hidden = false; renderSync(); };
+  $('myName').onchange = () => { myName = $('myName').value.trim(); store.set('myName', myName); };
   $('closeDialog').onclick = () => { $('syncDialog').hidden = true; };
   $('syncDialog').onclick = e => { if (e.target === $('syncDialog')) $('syncDialog').hidden = true; };
   $('createRoom').onclick = () => joinRoom(newCode());
@@ -948,6 +1053,169 @@ Reply with the translation only, with no quotes, labels, notes or explanations.`
       else { await navigator.clipboard.writeText(url); alert('Link copied / הקישור הועתק'); }
     } catch {}
   };
+
+  // ================= tasks =================
+  // Tasks are pinned at the top of every phone in the room. The whole list is kept, encrypted,
+  // as a retained message on the brokers, so a phone that connects later still gets it.
+  // Each phone records who read (✓✓) and who finished (✅) a task; lists from different
+  // phones are merged, so nothing is lost when two phones change it at the same time.
+  const tasks = new Map();
+  const TASK_KEEP_MS = 3 * 24 * 3600 * 1000;   // finished or deleted tasks are dropped after 3 days
+  const tasksKey = () => 'tasks:' + sync.room;
+
+  function loadTasks() {
+    tasks.clear();
+    for (const t of store.get(tasksKey(), [])) tasks.set(t.id, t);
+    pruneTasks();
+    renderTasks();
+  }
+  function pruneTasks() {
+    const now = Date.now();
+    for (const [id, t] of tasks) {
+      const finished = t.deleted || Object.keys(t.doneBy || {}).length;
+      if (finished && now - t.updatedAt > TASK_KEEP_MS) tasks.delete(id);
+    }
+  }
+  const taskSig = t => JSON.stringify([!!t.deleted, Object.keys(t.readBy || {}).sort(), Object.keys(t.doneBy || {}).sort()]);
+  function mergeTask(a, b) {
+    if (!a) return b;
+    return { ...a, ...b,
+      readBy: { ...a.readBy, ...b.readBy }, doneBy: { ...a.doneBy, ...b.doneBy },
+      deleted: !!(a.deleted || b.deleted), updatedAt: Math.max(a.updatedAt, b.updatedAt), _local: a._local };
+  }
+  function saveTasks(share) {
+    store.set(tasksKey(), [...tasks.values()].map(({ _local, ...t }) => t));
+    if (share) publish({ type: 'tasks', list: [...tasks.values()].map(({ _local, ...t }) => t) }, sync.topic + '/tasks', true);
+    renderTasks();
+  }
+  function onTaskList(list) {
+    if (!sync.room || !Array.isArray(list)) return;
+    const incoming = new Map(list.map(t => [t.id, t]));
+    let behind = false;   // this phone knows something the shared list doesn't
+    const fresh = [];
+    for (const t of incoming.values()) {
+      const before = tasks.get(t.id);
+      if (!before && !t.deleted && t.owner !== CLIENT_ID) fresh.push(t);
+      tasks.set(t.id, mergeTask(before, t));
+    }
+    for (const [id, t] of tasks) {
+      if (!incoming.has(id) || taskSig(t) !== taskSig(incoming.get(id))) behind = true;
+    }
+    pruneTasks();
+    saveTasks(behind);
+    if (fresh.length) {
+      try { navigator.vibrate && navigator.vibrate([150, 80, 150]); } catch {}
+    }
+  }
+  function updateTask(id, fn) {
+    const t = tasks.get(id);
+    if (!t) return;
+    fn(t);
+    t.updatedAt = Date.now();
+    saveTasks(true);
+  }
+
+  async function createTask(text) {
+    text = text.trim();
+    if (!text || !sync.room) return;
+    const now = Date.now();
+    const t = { id: uid(), owner: CLIENT_ID, ownerName: myName, lang: myLang, tlang: targetLang(), text,
+      translation: null, createdAt: now, updatedAt: now, readBy: {}, doneBy: {}, deleted: false };
+    tasks.set(t.id, t);
+    renderTasks();
+    try { const r = await translate(text, t.lang, t.tlang); t.translation = r.text; } catch {}
+    t.updatedAt = Date.now();
+    saveTasks(true);
+  }
+
+  // Task text in this phone's language: the sender's translation, the original, or a local translation.
+  function taskText(t) {
+    if (t.owner === CLIENT_ID || t.lang === myLang) return { text: t.text, lang: t.lang };
+    if (t.translation && t.tlang === myLang) return { text: t.translation, lang: myLang };
+    t._local = t._local || {};
+    if (t._local[myLang]) return { text: t._local[myLang], lang: myLang };
+    if (!t._local['…' + myLang]) {
+      t._local['…' + myLang] = true;
+      translate(t.text, t.lang, myLang).then(r => { t._local[myLang] = r.text; renderTasks(); }).catch(() => {});
+    }
+    return { text: t.translation || t.text, lang: t.translation ? t.tlang : t.lang };
+  }
+
+  function renderTasks() {
+    const box = $('tasks');
+    const list = [...tasks.values()].filter(t => !t.deleted);
+    const isDone = t => Object.keys(t.doneBy || {}).length > 0;
+    list.sort((a, b) => (isDone(a) - isDone(b)) || (a.createdAt - b.createdAt));
+    box.hidden = !sync.room || !list.length;
+    if (box.hidden) return;
+    const t = T[myLang];
+    const names = by => Object.values(by || {}).map(x => x.name).filter(Boolean).join(', ');
+    box.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'tasks-head';
+    head.innerHTML = '<span></span>';
+    head.firstChild.textContent = '📌 ' + t.tasks;
+    if (list.some(x => x.owner === CLIENT_ID && isDone(x))) {
+      const clear = document.createElement('button');
+      clear.textContent = '🧹 ' + t.clearDone;
+      clear.onclick = () => {
+        for (const x of tasks.values()) if (x.owner === CLIENT_ID && isDone(x)) { x.deleted = true; x.updatedAt = Date.now(); }
+        saveTasks(true);
+      };
+      head.appendChild(clear);
+    }
+    box.appendChild(head);
+    let newlyRead = false;
+    for (const task of list) {
+      const mine = task.owner === CLIENT_ID, done = isDone(task);
+      const el = document.createElement('div');
+      el.className = 'task' + (done ? ' done' : '');
+      el.innerHTML = '<div class="t-body"><div class="t-main"></div><div class="t-meta"></div></div>';
+      const shown = taskText(task);
+      setText(el.querySelector('.t-main'), shown.text, shown.lang);
+      const meta = el.querySelector('.t-meta');
+      if (mine) {
+        // Sender's view: who read it and who finished it.
+        const readers = Object.keys(task.readBy || {}).length;
+        meta.textContent = done ? '✅ ' + t.done + (names(task.doneBy) ? ' · ' + names(task.doneBy) : '')
+          : readers ? '✓✓ ' + t.read + (names(task.readBy) ? ' · ' + names(task.readBy) : '')
+          : task.translation ? '✓ ' + t.sent : '🕓';
+        meta.classList.toggle('done', done);
+        meta.classList.toggle('read', !done && readers > 0);
+        const del = document.createElement('button');
+        del.textContent = '✕';
+        del.title = 'Delete';
+        del.onclick = () => updateTask(task.id, x => { x.deleted = true; });
+        el.appendChild(del);
+      } else {
+        meta.textContent = (task.ownerName ? t.from + ' ' + task.ownerName + ' · ' : '') + task.text;
+        meta.dir = LANGS[task.lang].dir;
+        if (done) meta.textContent = '✅ ' + t.done + ' · ' + meta.textContent;
+        else {
+          const btn = document.createElement('button');
+          btn.className = 't-done';
+          btn.textContent = t.markDone;
+          btn.onclick = () => updateTask(task.id, x => { x.doneBy[CLIENT_ID] = { name: myName, at: Date.now() }; });
+          el.appendChild(btn);
+        }
+        // Seen on a visible screen = read.
+        if (!task.readBy[CLIENT_ID] && document.visibilityState === 'visible') {
+          task.readBy[CLIENT_ID] = { name: myName, at: Date.now() };
+          task.updatedAt = Date.now();
+          newlyRead = true;
+          if (shown.lang === myLang) speak(shown.text, myLang);
+        }
+      }
+      el.querySelector('.t-main').onclick = () => speak(shown.text, shown.lang, true);
+      box.appendChild(el);
+    }
+    if (newlyRead) setTimeout(() => saveTasks(true), 0);
+  }
+
+  $('taskBtn').onclick = () => { $('taskText').value = ''; $('taskDialog').hidden = false; $('taskText').focus(); };
+  $('taskClose').onclick = () => { $('taskDialog').hidden = true; };
+  $('taskDialog').onclick = e => { if (e.target === $('taskDialog')) $('taskDialog').hidden = true; };
+  $('taskSend').onclick = () => { createTask($('taskText').value); $('taskDialog').hidden = true; };
 
   // ================= test mode (#test) =================
   // Runs the sentences in tests.js through Claude and shows each translation and its time.
@@ -1002,6 +1270,41 @@ Reply with the translation only, with no quotes, labels, notes or explanations.`
     try { await navigator.clipboard.writeText(testReport || $('testOut').textContent); alert('Copied / הועתק'); } catch {}
   };
 
+  // ================= automatic updates =================
+  // Every few minutes, check whether a new version of the app was published. If so, reload by
+  // itself at a quiet moment: not while listening, and only after a minute without new sentences
+  // (or when the app comes back to the screen). Tasks, settings and the connection are kept.
+  const UPDATE_CHECK_MS = 5 * 60 * 1000;
+  let appHash = null, updateReady = false, lastActivity = Date.now();
+  async function pageHash() {
+    const res = await fetch(location.pathname + '?v=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const buf = await crypto.subtle.digest('SHA-256', await res.arrayBuffer());
+    return Array.from(new Uint8Array(buf).slice(0, 8), x => x.toString(16).padStart(2, '0')).join('');
+  }
+  async function checkForUpdate() {
+    try {
+      const h = await pageHash();
+      if (!appHash) appHash = h;
+      else if (h !== appHash) updateReady = true;
+    } catch {}
+    maybeReload();
+  }
+  function maybeReload() {
+    const quiet = !listening && !pending && Date.now() - lastActivity > 60000;
+    if (!updateReady || pending || !(quiet || document.visibilityState === 'hidden')) return;
+    store.set('resumeListening', listening);   // pick up listening again after the reload
+    location.reload();
+  }
+  new MutationObserver(() => { lastActivity = Date.now(); }).observe(feed, { childList: true });
+  setInterval(checkForUpdate, UPDATE_CHECK_MS);
+  setInterval(maybeReload, 30000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') checkForUpdate();
+    else maybeReload();
+  });
+  checkForUpdate();
+
   // ================= startup =================
   renderLang();
   const hash = new URLSearchParams(location.hash.slice(1));
@@ -1026,6 +1329,11 @@ Reply with the translation only, with no quotes, labels, notes or explanations.`
     joinRoom(store.get('room', null));
   }
   if ('speechSynthesis' in window) speechSynthesis.getVoices();
+  if (store.get('resumeListening', false)) {
+    store.del('resumeListening');
+    autoResumed = true;
+    start();
+  }
 })();
 </script>
 </body>
